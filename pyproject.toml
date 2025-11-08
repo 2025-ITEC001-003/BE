@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "jesafe"
+version = "0.1.0"
+description = ""
+authors = ["lwj0831 <wjl0831@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.121.0"
+uvicorn = {extras = ["standard"], version = "^0.38.0"}
+pandas = "^2.3.3"
+sqlalchemy = "^2.0.44"
+psycopg2-binary = "^2.9.11"
+langchain = "^0.2.0"
+langchain-openai = "^0.1.8"
+langchain-community = "^0.2.0"
+python-dotenv = "^1.2.1"
+jupyterlab = "^4.4.10"
+ipykernel = "^7.1.0"
+httpx = "^0.28.1"
+openpyxl = "^3.1.5"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
