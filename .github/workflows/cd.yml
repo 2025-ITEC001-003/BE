@@ -26,7 +26,11 @@ jobs:
             git pull origin main
 
             echo "Creating .env file from GitHub Secrets..."
+<<<<<<< HEAD
             echo "${{ secrets.ENV_FILE_CONTENT }}" > .env
+=======
+            echo '${{ secrets.ENV_FILE_CONTENT }}' > .env
+>>>>>>> 71c8b5b (chore: edit env file copy command)
 
             echo "Installing Python dependencies..."
             poetry install
