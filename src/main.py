@@ -2,6 +2,9 @@ from fastapi import FastAPI
 import uvicorn
 from src.schemas import ChatRequest, ChatResponse
 from src.services import get_agent_response
+from fastapi.responses import StreamingResponse
+import json
+from src.services import stream_agent_response
 
 app = FastAPI(
     title="JeSafe 챗봇 API",
@@ -13,6 +16,31 @@ async def chat(request: ChatRequest):
     """챗봇 질의응답 엔드포인트"""
     answer = await get_agent_response(request.query, request.session_id)
     return ChatResponse(answer=answer)
+
+@app.post("/chat-stream")
+async def stream_chat(request: ChatRequest):
+    """
+    챗봇 질의응답 스트리밍 엔드포인트 (SSE)
+    """
+    generator = sse_format_generator(request.query, request.session_id)
+    return StreamingResponse(generator, media_type="text/event-stream")
+
+async def sse_format_generator(query: str, session_id: str):
+    """
+    서비스 로직(stream_agent_response)을 감싸서
+    SSE (Server-Sent Events) 형식으로 변환하는 생성기
+    """
+    try:
+        async for chunk in stream_agent_response(query, session_id):
+            data_payload = {"chunk": chunk}
+            sse_data = f"data: {json.dumps(data_payload, ensure_ascii=False)}\n\n"
+
+            yield sse_data
+
+    except Exception as e:
+        print(f"[SSE 생성기 오류] {e}")
+        error_payload = {"error": str(e)}
+        yield f"data: {json.dumps(error_payload, ensure_ascii=False)}\n\n"
 
 @app.get("/")
 def read_root():
