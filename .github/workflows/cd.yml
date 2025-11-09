@@ -1,0 +1,40 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to EC2 Instance
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: SSH into EC2 and Deploy
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+
+          script: |
+            cd /home/ubuntu/jesafe
+
+            echo "Pulling latest code from main branch..."
+            git checkout main
+            git pull origin main
+
+            echo "Creating .env file from GitHub Secrets..."
+            echo "${{ secrets.ENV_FILE_CONTENT }}" > .env
+
+            echo "Installing Python dependencies..."
+            poetry install
+
+            echo "Starting PostgreSQL container..."
+            docker-compose up -d
+
+            echo "Restarting FastAPI application with PM2..."
+            poetry run pm2 reload jesafe-api || poetry run pm2 start "uvicorn src.main:app --host 0.0.0.0 --port 8000" --name jesafe-api
+            
+            echo "Deployment successful!"
