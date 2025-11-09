@@ -7,12 +7,11 @@ from langchain.agents import AgentExecutor, create_tool_calling_agent
 from src.core import OPENAI_API_KEY
 from src.tools import all_tools
 
-# 1. 메인 LLM 초기화
+# 메인 LLM 초기화
 llm = ChatOpenAI(model="gpt-4-turbo", temperature=0, api_key=OPENAI_API_KEY)
 
-# 2. 메인 Agent용 프롬프트
+# 메인 Agent용 프롬프트
 VALID_LOCATIONS_LIST = "['제주시', '서귀포시', '애월읍', '한림읍', '성산읍', '안덕면', '조천읍', '구좌읍']"
-
 prompt = ChatPromptTemplate.from_messages([
     ("system", (
         "당신은 'JeSafe' 제주 관광 안전 챗봇입니다."
@@ -31,37 +30,36 @@ prompt = ChatPromptTemplate.from_messages([
     MessagesPlaceholder(variable_name="agent_scratchpad"),
 ])
 
-# 3. router agent
+# router agent
 router_agent = create_tool_calling_agent(
     llm=llm,
     tools=all_tools,
     prompt=prompt
 )
 
-# 4. 메인 Agent Executor
+# 메인 Agent Executor
 main_agent_executor = AgentExecutor(
     agent=router_agent,
     tools=all_tools,
     verbose=True
 )
 
-# 5. 대화 기록(Memory) 관리
+# 대화 기록(Memory) 관리
 # (세션 ID별로 대화 기록을 저장할 임시 저장소)
 chat_history_store = {}
 
-# 6. 비즈니스 로직 함수 (API가 호출)
+# 비즈니스 로직 함수 (API가 호출)
 async def get_agent_response(query: str, session_id: str) -> str:
     """사용자 질문과 세션ID를 받아 Agent를 실행하고 답변을 반환"""
     print(f"서비스: [세션: {session_id}] \"{query}\" 질문 처리 시작")
 
-    # 1. 해당 세션의 대화 기록 가져오기
+    # 해당 세션의 대화 기록 가져오기
     if session_id not in chat_history_store:
         chat_history_store[session_id] = ChatMessageHistory()
-    
     chat_history = chat_history_store[session_id]
 
     try:
-        # 2. 메인 Agent 실행
+        # 메인 Agent 실행
         response = await main_agent_executor.ainvoke({
             "input": query,
             "chat_history": chat_history.messages
@@ -69,7 +67,7 @@ async def get_agent_response(query: str, session_id: str) -> str:
         
         answer = response.get("output", "답변 생성 실패")
 
-        # 3. 대화 기록에 현재 질문과 답변 추가
+        # 대화 기록에 현재 질문과 답변 추가
         chat_history.add_user_message(query)
         chat_history.add_ai_message(answer)
         
@@ -78,3 +76,46 @@ async def get_agent_response(query: str, session_id: str) -> str:
         answer = "죄송합니다. 내부 오류가 발생했습니다."
 
     return answer
+
+async def stream_agent_response(query: str, session_id: str):
+    """
+    Agent의 응답을 비동기 생성기(async generator)로 스트리밍합니다.
+    """
+    print(f"스트리밍 서비스: [세션: {session_id}] \"{query}\" 처리 시작")
+
+    # 대화 기록 가져오기
+    if session_id not in chat_history_store:
+        chat_history_store[session_id] = ChatMessageHistory()
+    chat_history = chat_history_store[session_id]
+
+    # 스트리밍 실행
+    full_answer = ""
+    try:
+        # main_agent_executor.ainvoke 대신 .astream_events 사용
+        async for event in main_agent_executor.astream_events(
+            {"input": query, "chat_history": chat_history.messages},
+            version="v1" # 이벤트 스트림 버전 v1 사용
+        ):
+            kind = event["event"]
+
+            # LLM이 생성하는 응답 스트림(토큰)만 필터링
+            if kind == "on_chat_model_stream":
+                chunk = event["data"].get("chunk")
+                # AIMessageChunk의 content만 추출
+                if isinstance(chunk, AIMessage) and chunk.content:
+                    content = chunk.content
+                    if isinstance(content, str):
+                        full_answer += content
+                    yield content # 청크를 즉시 반환(yield)
+            
+    except Exception as e:
+        print(f"[Streaming Agent 오류] {e}")
+        error_message = "죄송합니다. 내부 오류가 발생했습니다."
+        yield error_message
+        full_answer = error_message
+    
+    finally:
+        # 스트리밍이 모두 끝난 후, 전체 대화 내용을 기록
+        if full_answer:
+            chat_history.add_user_message(query)
+            chat_history.add_ai_message(full_answer)
