@@ -17,12 +17,12 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
 
           script: |
-            # 프로젝트 디렉토리로 이동
+            source ~/.bashrc
+
             cd /home/ubuntu/jesafe
 
             echo "Pulling latest code from main branch..."
             git checkout main
-            
             export GIT_TERMINAL_PROMPT=0 
             git pull origin main
 
@@ -33,9 +33,9 @@ jobs:
             poetry install
 
             echo "Starting PostgreSQL container..."
-            docker-compose up -d
+            docker compose up -d
 
             echo "Restarting FastAPI application with PM2..."
             poetry run pm2 reload jesafe-api || poetry run pm2 start "uvicorn src.main:app --host 0.0.0.0 --port 8000" --name jesafe-api
-            
+
             echo "Deployment successful!"
