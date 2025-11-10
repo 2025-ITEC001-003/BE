@@ -15,4 +15,14 @@ os.environ["OPENWEATHER_API_KEY"] = OPENWEATHER_API_KEY
 
 # DB 엔진 및 LangChain DB 인스턴스
 engine = create_engine(DATABASE_URL)
-db_langchain = SQLDatabase(engine=engine, include_tables=['jeju_accidents'])
+_db_langchain= None
+
+def get_db_langchain():
+    global _db_langchain
+
+    if _db_langchain is not None:
+        return _db_langchain
+
+    _db_langchain = SQLDatabase(engine=engine, include_tables=['jeju_accidents'])
+
+    return _db_langchain

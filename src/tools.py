@@ -3,7 +3,7 @@ from langchain.tools import Tool
 from langchain_community.agent_toolkits import create_sql_agent
 from langchain_openai import ChatOpenAI
 
-from src.core import db_langchain, OPENAI_API_KEY, OPENWEATHER_API_KEY
+from src.core import get_db_langchain, OPENAI_API_KEY, OPENWEATHER_API_KEY
 from src.data_loader import get_jeju_coordinates
 
 llm = ChatOpenAI(model="gpt-4-turbo", temperature=0, api_key=OPENAI_API_KEY)
@@ -117,9 +117,11 @@ weather_tool_future = Tool.from_function(
 
 
 # --- 3. 사고 통계 도구 (Tool 3) ---
+db_instance = get_db_langchain()
+
 sql_agent_executor = create_sql_agent(
     llm=llm,
-    db=db_langchain,
+    db=db_instance,
     verbose=True,
     handle_parsing_errors=True
 )
