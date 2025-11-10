@@ -30,7 +30,7 @@ jobs:
             echo '${{ secrets.ENV_FILE_CONTENT }}' > .env
 
             echo "Installing Python dependencies..."
-            $POETRY_PATH install
+            $POETRY_PATH install --no-root
 
             echo "Starting PostgreSQL container..."
             docker compose up -d
