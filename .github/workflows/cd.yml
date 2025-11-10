@@ -35,6 +35,12 @@ jobs:
             echo "Starting PostgreSQL container..."
             docker compose up -d
 
+            echo "Waiting for DB to be ready..."
+            sleep 5 
+
+            echo "Loading accident data (CSV to DB)..."
+            $POETRY_PATH run python -m util.load_jeju_accidents
+
             echo "Restarting FastAPI application with PM2..."
             pm2 reload jesafe-api || pm2 start "$POETRY_PATH run uvicorn src.main:app --host 0.0.0.0 --port 8000" --name jesafe-api
 
