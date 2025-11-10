@@ -1,10 +1,16 @@
 import httpx
 from langchain.tools import Tool
 from langchain_community.agent_toolkits import create_sql_agent
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough
 from langchain_openai import ChatOpenAI
+from langchain.retrievers import EnsembleRetriever
+from langchain_core.output_parsers import StrOutputParser
+from src.core import get_vector_store, get_bm25_retriever
 
 from src.core import get_db_langchain, OPENAI_API_KEY, OPENWEATHER_API_KEY
 from src.data_loader import get_jeju_coordinates
+from src.core import DATABASE_URL
 
 llm = ChatOpenAI(model="gpt-4-turbo", temperature=0, api_key=OPENAI_API_KEY)
 
@@ -49,7 +55,7 @@ def get_current_weather(location: str) -> str:
         return f"OWM (오늘 날씨) 오류: {str(e)}"
 
 # '오늘 날씨'용 Tool 래핑
-weather_tool_today = Tool.from_function(
+today_weather_tool = Tool.from_function(
     func=get_current_weather,
     name="get_current_weather",
     description=(
@@ -105,7 +111,7 @@ def get_date_weather_summary(location: str, date: str) -> str:
         return f"OWM (특정 날짜) 오류: {str(e)}"
 
 # '특정 날짜 예보'용 Tool 래핑
-weather_tool_future = Tool.from_function(
+future_weather_tool = Tool.from_function(
     func=get_date_weather_summary,
     name="get_date_weather_summary",
     description=(
@@ -134,7 +140,7 @@ def run_sql_agent(query: str) -> str:
         print(f"[Tool] SQL Agent 오류: {str(e)}")
         return f"SQL 데이터베이스 조회 중 오류 발생: {str(e)}"
 
-sql_tool = Tool(
+safety_sql_tool = Tool(
     name="jeju_safety_statistics_db",
     func=run_sql_agent,
     description=(
@@ -144,6 +150,60 @@ sql_tool = Tool(
     )
 )
 
-# --- 4. 도구 리스트 ---
-# (OWM 도구 2개와 SQL 도구 1개를 포함)
-all_tools = [weather_tool_today, weather_tool_future, sql_tool]
+
+# --- 4. 관광정보 RAG 도구 (Tool 4) ---
+rag_prompt_template = """
+당신은 제주 관광 전문가입니다. 오직 다음 '컨텍스트' 정보만을 기반으로 사용자의 질문에 답변해야 합니다.
+컨텍스트에 답변이 없다면 "죄송합니다, 요청하신 정보는 찾을 수 없습니다."라고 답변하세요.
+
+[컨텍스트]
+{context}
+
+[질문]
+{question}
+"""
+prompt_rag = ChatPromptTemplate.from_template(rag_prompt_template)
+
+print("core로부터 PGVector Store 가져오는 중...")
+# 의미기반 리트리버 생성
+# (PGVector 벡터스토어로부터 리트리버 생성)
+vector_store = get_vector_store()
+vector_retriever = vector_store.as_retriever(search_kwargs={"k": 3})
+
+# BM25 리트리버 (키워드 기반 검색) 생성 - 키워드 리트리버
+# (BM25는 In-Memory 방식이므로, 앱 실행 시 문서를 로드해야 함)
+# TODO: 실제 서비스에서는 이 로드/분할 과정을 캐시해야 합니다.
+print("core로부터 BM25 Retriever 가져오는 중...")
+bm25_retriever = get_bm25_retriever()
+
+# 앙상블 리트리버 (Ensemble Retriever) 생성
+# (Vector: 60%, BM25: 40% 비율로 혼합)
+ensemble_retriever = EnsembleRetriever(
+    retrievers=[bm25_retriever, vector_retriever],
+    weights=[0.4, 0.6]
+)
+
+# RAG 체인(Chain) 결합
+def format_docs(docs):
+    return "\n\n".join(doc.page_content for doc in docs)
+
+rag_chain = (
+    {"context": ensemble_retriever | format_docs, "question": RunnablePassthrough()}
+    | prompt_rag
+    | llm
+    | StrOutputParser()
+)
+
+# RAG 체인을 Tool로 포장
+tourism_rag_tool = Tool(
+    name="jeju_tourism_rag_search",
+    func=rag_chain.invoke, # RAG 체인을 직접 실행
+    description=(
+        "제주도 관광 명소, 오름, 향토 음식, 한류 컨텐츠 등 일반적인 관광 정보에 대한 질문에 답할 때 사용됩니다. "
+        "(예: '제주도 오름 추천해줘', '제주 향토음식이 뭐야?') "
+        "질문 전체를 입력으로 전달해야 합니다."
+    )
+)
+
+# --- 도구 리스트 ---
+all_tools = [today_weather_tool, future_weather_tool, safety_sql_tool, tourism_rag_tool]
