@@ -1,9 +1,7 @@
-name: Deploy to EC2
+name: Deploy to EC2 (Manual)
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -19,18 +17,17 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
 
           script: |
+            # 프로젝트 디렉토리로 이동
             cd /home/ubuntu/jesafe
 
             echo "Pulling latest code from main branch..."
             git checkout main
+            
+            export GIT_TERMINAL_PROMPT=0 
             git pull origin main
 
             echo "Creating .env file from GitHub Secrets..."
-<<<<<<< HEAD
-            echo "${{ secrets.ENV_FILE_CONTENT }}" > .env
-=======
             echo '${{ secrets.ENV_FILE_CONTENT }}' > .env
->>>>>>> 71c8b5b (chore: edit env file copy command)
 
             echo "Installing Python dependencies..."
             poetry install
