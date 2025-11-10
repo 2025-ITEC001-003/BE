@@ -1,6 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
+from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import ChatOpenAI
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 
@@ -45,8 +46,22 @@ main_agent_executor = AgentExecutor(
 )
 
 # 대화 기록(Memory) 관리
-# (세션 ID별로 대화 기록을 저장할 임시 저장소)
+# (세션 ID별로 대화 기록을 저장할 휘발성 인메모리 저장소)
 chat_history_store = {}
+
+def get_session_history(session_id: str) -> ChatMessageHistory:
+    """세션 ID를 기반으로 메모리에서 ChatMessageHistory 객체를 가져옵니다."""
+    if session_id not in chat_history_store:
+        chat_history_store[session_id] = ChatMessageHistory()
+    return chat_history_store[session_id]
+
+# Agent와 기록 관리자 래핑(Wrapping)
+agent_with_history = RunnableWithMessageHistory(
+    main_agent_executor,
+    get_session_history,
+    input_messages_key="input",
+    history_messages_key="chat_history",
+)
 
 # 비즈니스 로직 함수 (API가 호출)
 async def get_agent_response(query: str, session_id: str) -> str:
@@ -92,8 +107,10 @@ async def stream_agent_response(query: str, session_id: str):
     full_answer = ""
     try:
         # main_agent_executor.ainvoke 대신 .astream_events 사용
-        async for event in main_agent_executor.astream_events(
-            {"input": query, "chat_history": chat_history.messages},
+        async for event in agent_with_history.astream_events(
+            {"input": query},
+            # ⬇️ 'session_id'는 config로 전달
+            config={"configurable": {"session_id": session_id}},
             version="v1" # 이벤트 스트림 버전 v1 사용
         ):
             kind = event["event"]
@@ -105,17 +122,9 @@ async def stream_agent_response(query: str, session_id: str):
                 if isinstance(chunk, AIMessage) and chunk.content:
                     content = chunk.content
                     if isinstance(content, str):
-                        full_answer += content
-                    yield content # 청크를 즉시 반환(yield)
+                        yield content # 청크를 즉시 반환(yield)
             
     except Exception as e:
         print(f"[Streaming Agent 오류] {e}")
         error_message = "죄송합니다. 내부 오류가 발생했습니다."
         yield error_message
-        full_answer = error_message
-    
-    finally:
-        # 스트리밍이 모두 끝난 후, 전체 대화 내용을 기록
-        if full_answer:
-            chat_history.add_user_message(query)
-            chat_history.add_ai_message(full_answer)
