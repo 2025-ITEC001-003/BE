@@ -1,6 +1,6 @@
 import os
 from langchain_community.document_loaders import UnstructuredPDFLoader
-from langchain_postgres import PGVector
+from langchain_postgres.vectorstores import PGVector
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from src.core import DATABASE_URL, get_cached_embedder, COLLECTION_NAME
 
