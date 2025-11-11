@@ -3,16 +3,10 @@ from langchain.tools import Tool
 from langchain_community.agent_toolkits import create_sql_agent
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
-from langchain_openai import ChatOpenAI
-from langchain.retrievers import EnsembleRetriever
 from langchain_core.output_parsers import StrOutputParser
-from src.core import get_vector_store, get_bm25_retriever
 
-from src.core import get_db_langchain, OPENAI_API_KEY, OPENWEATHER_API_KEY
+from src.core import get_db_langchain, OPENWEATHER_API_KEY, llm, get_compression_retriever
 from src.data_loader import get_jeju_coordinates
-from src.core import DATABASE_URL
-
-llm = ChatOpenAI(model="gpt-4-turbo", temperature=0, api_key=OPENAI_API_KEY)
 
 # --- 1. '오늘/현재' 날씨 도구 (Tool 1 - OWM) ---
 def get_current_weather(location: str) -> str:
@@ -164,31 +158,15 @@ rag_prompt_template = """
 """
 prompt_rag = ChatPromptTemplate.from_template(rag_prompt_template)
 
-print("core로부터 PGVector Store 가져오는 중...")
-# 의미기반 리트리버 생성
-# (PGVector 벡터스토어로부터 리트리버 생성)
-vector_store = get_vector_store()
-vector_retriever = vector_store.as_retriever(search_kwargs={"k": 3})
-
-# BM25 리트리버 (키워드 기반 검색) 생성 - 키워드 리트리버
-# (BM25는 In-Memory 방식이므로, 앱 실행 시 문서를 로드해야 함)
-# TODO: 실제 서비스에서는 이 로드/분할 과정을 캐시해야 합니다.
-print("core로부터 BM25 Retriever 가져오는 중...")
-bm25_retriever = get_bm25_retriever()
-
-# 앙상블 리트리버 (Ensemble Retriever) 생성
-# (Vector: 60%, BM25: 40% 비율로 혼합)
-ensemble_retriever = EnsembleRetriever(
-    retrievers=[bm25_retriever, vector_retriever],
-    weights=[0.4, 0.6]
-)
+# 앙상블 리트리버 + 문서 압축기 리트리버
+compression_retriever = get_compression_retriever()
 
 # RAG 체인(Chain) 결합
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
 rag_chain = (
-    {"context": ensemble_retriever | format_docs, "question": RunnablePassthrough()}
+    {"context": compression_retriever | format_docs, "question": RunnablePassthrough()}
     | prompt_rag
     | llm
     | StrOutputParser()

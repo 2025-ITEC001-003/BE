@@ -2,13 +2,19 @@ import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from langchain_community.utilities import SQLDatabase
+from langchain_openai import ChatOpenAI
 from langchain.storage import LocalFileStore
 from langchain.embeddings import CacheBackedEmbeddings
 from langchain_openai import OpenAIEmbeddings
 from langchain_postgres import PGVector
 from langchain_community.document_loaders import UnstructuredPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.retrievers import BM25Retriever
+from langchain_community.retrievers import BM25Retriever
+from langchain.retrievers import ContextualCompressionRetriever, EnsembleRetriever
+from langchain.retrievers.document_compressors.base import DocumentCompressorPipeline
+from langchain.retrievers.document_compressors.embeddings_filter import EmbeddingsFilter
+from langchain_community.document_transformers import EmbeddingsRedundantFilter
+
 
 # .env 파일 로드
 load_dotenv()
@@ -20,7 +26,10 @@ OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 os.environ["OPENWEATHER_API_KEY"] = OPENWEATHER_API_KEY
 
-# # --- PostgreDB 싱글톤 (기존) ---
+# llm
+llm = ChatOpenAI(model="gpt-4-turbo", temperature=0, api_key=OPENAI_API_KEY)
+
+# --- PostgreDB 싱글톤 ---
 engine = create_engine(DATABASE_URL)
 _db_langchain= None
 
@@ -75,6 +84,7 @@ def get_vector_store():
     return _vector_store_instance
 
 # --- BM25 Retriever 싱글톤 ---
+#TODO: 실제 서비스에서는 이 로드/분할 과정을 캐시해야 합니다.
 _bm25_retriever_instance = None
 def get_bm25_retriever():
     """
@@ -86,7 +96,7 @@ def get_bm25_retriever():
         return _bm25_retriever_instance
 
     print("Initializing BM25Retriever (Loading PDF docs)...")
-    
+
     # 1. 'src/core.py' 파일 기준으로 'data' 폴더 절대 경로 계산
     CURRENT_FILE_PATH = os.path.abspath(__file__)
     SRC_DIR = os.path.dirname(CURRENT_FILE_PATH)
@@ -122,3 +132,51 @@ def get_bm25_retriever():
     
     print("BM25Retriever initialization complete.")
     return _bm25_retriever_instance
+
+# --- 최종 RAG 리트리버 싱글톤 ---
+_compression_retriever_instance = None
+def get_compression_retriever():
+    """
+    압축/필터링 기능이 포함된 최종 앙상블 리트리버 싱글톤 객체를 반환합니다.
+    """
+    global _compression_retriever_instance
+    if _compression_retriever_instance is not None:
+        return _compression_retriever_instance
+
+    print("Initializing Compression Retriever (Ensemble + Filters)...")
+    
+    # 1. 의미, 키워드 리트리버 가져오기
+    vector_retriever = get_vector_store().as_retriever(search_kwargs={"k": 3})
+    bm25_retriever = get_bm25_retriever()
+    
+    # 2. 앙상블 리트리버 생성
+    ensemble_retriever = EnsembleRetriever(
+        retrievers=[bm25_retriever, vector_retriever],
+        weights=[0.4, 0.6]
+    )
+    
+    # 3. 압축 필터 생성 (임베더 싱글톤 사용)
+    cached_embedder = get_cached_embedder()
+    
+    redundant_filter = EmbeddingsRedundantFilter(
+        embeddings=cached_embedder,
+        similarity_threshold=0.95
+    )
+    relevance_filter = EmbeddingsFilter(
+        embeddings=cached_embedder,
+        similarity_threshold=0.7 
+    )
+    
+    # 4. 압축 파이프라인 생성
+    pipeline_compressor = DocumentCompressorPipeline(
+        transformers=[redundant_filter, relevance_filter]
+    )
+    
+    # 5. 최종 압축 리트리버 생성 및 저장
+    _compression_retriever_instance = ContextualCompressionRetriever(
+        base_compressor=pipeline_compressor,
+        base_retriever=ensemble_retriever
+    )
+    
+    print("Compression Retriever initialization complete.")
+    return _compression_retriever_instance
