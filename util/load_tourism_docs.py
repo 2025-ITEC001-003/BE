@@ -1,10 +1,7 @@
 import os
 from langchain_community.document_loaders import UnstructuredPDFLoader
-from langchain_openai import OpenAIEmbeddings
 from langchain_postgres import PGVector
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.storage import LocalFileStore
-from langchain.embeddings import CacheBackedEmbeddings
 from src.core import DATABASE_URL, get_cached_embedder, COLLECTION_NAME
 
 # 문서 로드
