@@ -9,3 +9,6 @@
 
 # pychache
 __pycache__/
+
+# cache
+.cache

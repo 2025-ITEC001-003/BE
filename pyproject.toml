@@ -20,6 +20,9 @@ jupyterlab = "^4.4.10"
 ipykernel = "^7.1.0"
 httpx = "^0.28.1"
 openpyxl = "^3.1.5"
+langchain-postgres = "^0.0.16"
+unstructured = {extras = ["pdf"], version = "^0.18.18"}
+rank-bm25 = "^0.2.2"
 
 
 [build-system]

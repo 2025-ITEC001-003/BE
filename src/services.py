@@ -1,6 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
+from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import ChatOpenAI
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 
@@ -15,15 +16,27 @@ VALID_LOCATIONS_LIST = "['제주시', '서귀포시', '애월읍', '한림읍', 
 prompt = ChatPromptTemplate.from_messages([
     ("system", (
         "당신은 'JeSafe' 제주 관광 안전 챗봇입니다."
-        "날씨 질문이나 안전 사고 통계 질문에 답할 수 있습니다."
-        "필요한 경우 도구(tools)를 사용하여 정보를 찾습니다."
+        "날씨, 안전 사고, 관광 정보 질문에 답할 수 있습니다."
+        "필요한 도구를 사용하여 정확한 정보를 찾습니다."
+        
+        "### 도구 사용 규칙 (매우 중요) ###"
+        
+        "1. **날씨 도구 사용 규칙:**"
+        "   - '오늘' 또는 '현재' 날씨 질문에는 **`today_weather_tool`**을 사용합니다."
+        "   - '내일' 또는 '특정 날짜'의 예보 질문에는 **`future_weather_tool`**을 사용합니다."
+        "   - `location` 인자는 **반드시** 아래 목록에 있는 유효한 이름 중 하나여야 합니다:"
+        f"     - 유효한 위치 목록: {VALID_LOCATIONS_LIST}"
+        "   - 만약 사용자가 '제주도'처럼 모호한 위치를 질문하면, **절대 '제주도'를 `location` 인자로 사용하지 말고, '제주시'를 기본값으로 사용해야 합니다.**"
+        "   - 만약 사용자가 목록에 없는 지역(예: '한라산')을 질문하면, '제주시'의 날씨를 대신 알려주거나 가장 가까운 유효 위치(예: '서귀포시')의 날씨를 알려준다고 명시해야 합니다."
+        "   - `location` 인자로 `KeyError`나 `ValueError`(좌표를 찾을 수 없음) 오류가 발생하면, 이는 당신이 유효하지 않은 `location` 이름을 사용했기 때문입니다. 즉시 '제주시' 또는 다른 유효한 위치로 다시 시도해야 합니다."
+        
+        "2. **안전 사고 통계 질문** (예: '낙상 사고 몇 건이야?', '겨울철 사고 유형'):"
+        "   - **`safety_sql_tool`** 도구를 사용합니다."
+        
+        "3. **관광 정보 질문** (예: '오름 추천해줘', '제주 향토음식 뭐 있어?', '한류 촬영지 알려줘'):"
+        "   - **`tourism_rag_tool`** 도구를 사용합니다."
 
-        "### 날씨 도구 사용 규칙 (매우 중요) ###"
-        "1. 날씨 도구(`get_current_weather`, `get_date_weather_summary`)를 호출할 때, `location` 인자는 **반드시** 아래 목록에 있는 유효한 이름 중 하나여야 합니다."
-        f" - 유효한 위치 목록: {VALID_LOCATIONS_LIST}"
-        "2. 만약 사용자가 '제주도'처럼 모호한 위치를 질문하면, **절대 '제주도'를 `location` 인자로 사용하지 말고, '제주시'를 기본값으로 사용해야 합니다.**"
-        "3. 만약 사용자가 목록에 없는 지역(예: '한라산')을 질문하면, '제주시'의 날씨를 대신 알려주거나 가장 가까운 유효 위치(예: '서귀포시')의 날씨를 알려준다고 명시해야 합니다."
-        "4. `location` 인자로 `KeyError`나 `ValueError`(좌표를 찾을 수 없음) 오류가 발생하면, 이는 당신이 유효하지 않은 `location` 이름을 사용했기 때문입니다. 즉시 '제주시' 또는 다른 유효한 위치로 다시 시도해야 합니다."
+        "4. 일반 대화나 인사에는 도구를 사용하지 마세요."
     )),
     MessagesPlaceholder(variable_name="chat_history"),
     ("human", "{input}"),
@@ -45,8 +58,22 @@ main_agent_executor = AgentExecutor(
 )
 
 # 대화 기록(Memory) 관리
-# (세션 ID별로 대화 기록을 저장할 임시 저장소)
+# (세션 ID별로 대화 기록을 저장할 휘발성 인메모리 저장소)
 chat_history_store = {}
+
+def get_session_history(session_id: str) -> ChatMessageHistory:
+    """세션 ID를 기반으로 메모리에서 ChatMessageHistory 객체를 가져옵니다."""
+    if session_id not in chat_history_store:
+        chat_history_store[session_id] = ChatMessageHistory()
+    return chat_history_store[session_id]
+
+# Agent와 기록 관리자 래핑(Wrapping)
+agent_with_history = RunnableWithMessageHistory(
+    main_agent_executor,
+    get_session_history,
+    input_messages_key="input",
+    history_messages_key="chat_history",
+)
 
 # 비즈니스 로직 함수 (API가 호출)
 async def get_agent_response(query: str, session_id: str) -> str:
@@ -92,8 +119,10 @@ async def stream_agent_response(query: str, session_id: str):
     full_answer = ""
     try:
         # main_agent_executor.ainvoke 대신 .astream_events 사용
-        async for event in main_agent_executor.astream_events(
-            {"input": query, "chat_history": chat_history.messages},
+        async for event in agent_with_history.astream_events(
+            {"input": query},
+            # ⬇️ 'session_id'는 config로 전달
+            config={"configurable": {"session_id": session_id}},
             version="v1" # 이벤트 스트림 버전 v1 사용
         ):
             kind = event["event"]
@@ -105,17 +134,9 @@ async def stream_agent_response(query: str, session_id: str):
                 if isinstance(chunk, AIMessage) and chunk.content:
                     content = chunk.content
                     if isinstance(content, str):
-                        full_answer += content
-                    yield content # 청크를 즉시 반환(yield)
+                        yield content # 청크를 즉시 반환(yield)
             
     except Exception as e:
         print(f"[Streaming Agent 오류] {e}")
         error_message = "죄송합니다. 내부 오류가 발생했습니다."
         yield error_message
-        full_answer = error_message
-    
-    finally:
-        # 스트리밍이 모두 끝난 후, 전체 대화 내용을 기록
-        if full_answer:
-            chat_history.add_user_message(query)
-            chat_history.add_ai_message(full_answer)
