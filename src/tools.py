@@ -1,18 +1,22 @@
 import httpx
-from langchain.tools import Tool
+from langchain.tools import tool
 from langchain_community.agent_toolkits import create_sql_agent
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
+from pydantic import BaseModel, Field
 
 from src.core import get_db_langchain, OPENWEATHER_API_KEY, llm, get_compression_retriever
 from src.data_loader import get_jeju_coordinates
 
 # --- 1. '오늘/현재' 날씨 도구 (Tool 1 - OWM) ---
+@tool
 def get_current_weather(location: str) -> str:
     """
-    OpenWeatherMap 'Overview' API를 호출하여 
-    특정 위치의 '현재/오늘' 날씨 요약을 반환합니다.
+    사용자가 '현재' 또는 '오늘'의 날씨를 물어볼 때 사용됩니다.
+    
+    Args:
+        location (str): 날씨를 조회할 제주도 내의 특정 위치 (예: '제주시', '애월읍')
     """
     print(f"[Tool] '오늘 날씨 (OWM)' 도구 호출됨: {location}")
     if not OPENWEATHER_API_KEY:
@@ -48,22 +52,17 @@ def get_current_weather(location: str) -> str:
     except Exception as e:
         return f"OWM (오늘 날씨) 오류: {str(e)}"
 
-# '오늘 날씨'용 Tool 래핑
-today_weather_tool = Tool.from_function(
-    func=get_current_weather,
-    name="get_current_weather",
-    description=(
-        "사용자가 '현재' 또는 '오늘'의 날씨를 물어볼 때 사용됩니다. "
-        "위치(location) 인자만 필요합니다. (예: '오늘 제주시 날씨')"
-    )
-)
-
-
 # --- 2. '특정 날짜' 예보 도구 (Tool 2 - OWM) ---
+@tool
 def get_date_weather_summary(location: str, date: str) -> str:
     """
-    OpenWeatherMap 'Day Summary' API를 호출하여 
-    '특정 날짜'(내일, 모레 등)의 날씨 요약을 반환합니다.
+    사용자가 '내일', '모레' 또는 '특정 날짜'의 날씨 예보를 물어볼 때 사용됩니다.
+    [필수] 'location'과 'date' 인자 2개가 모두 필요합니다.
+    만약 사용자가 질문에서 위치(location)를 생략했다면, **반드시 대화 기록(context)에서 위치를 찾아 함께 전달해야 합니다.**
+    
+    Args:
+        location (str): 날씨를 조회할 제주도 내의 특정 위치 (예: '제주시', '애월읍')
+        date (str): 조회할 미래 날짜 (YYYY-MM-DD 형식)
     """
     print(f"[Tool] '특정 날짜 예보 (OWM)' 도구 호출됨: {location}, {date}")
     if not OPENWEATHER_API_KEY:
@@ -72,6 +71,7 @@ def get_date_weather_summary(location: str, date: str) -> str:
     try:
         # CSV에서 lat/lon 좌표 가져오기
         coords = get_jeju_coordinates(location)
+        print(f"[coords] {coords}")
         lat, lon = coords['lat'], coords['lon']
         
         # OWM 'day_summary' API 호출
@@ -86,12 +86,31 @@ def get_date_weather_summary(location: str, date: str) -> str:
             data = response.json()
             
             # (OWM day_summary 응답 파싱)
-            description = data.get('summary', '정보 없음')
             temp_min = data.get('temperature', {}).get('min', 'N/A')
             temp_max = data.get('temperature', {}).get('max', 'N/A')
+            precipitation = data.get('precipitation', {}).get('total', 0.0)
+            # 오후 구름 양을 대표로 사용
+            cloud_cover = data.get('cloud_cover', {}).get('afternoon', -1) 
+
+            description_parts = []
+            # 1. 강수 정보
+            if precipitation > 0.0:
+                description_parts.append(f"총 {precipitation}mm의 비가 예상됩니다.")
+            # 2. 구름 정보 (비가 오지 않을 경우)
+            elif cloud_cover != -1:
+                if cloud_cover < 30:
+                    description_parts.append("대체로 맑겠습니다.")
+                elif cloud_cover < 70:
+                    description_parts.append("구름이 다소 있겠습니다.")
+                else:
+                    description_parts.append("흐리겠습니다.")
+            else:
+                description_parts.append("날씨 정보를 가져올 수 없습니다.") # Fallback
+                
+            description = " ".join(description_parts)
             
             return (
-                f"'{location}'의 '{date}' 날씨 예보: {description}, "
+                f"'{location}'의 '{date}' 날씨 예보: {description} "
                 f"예상 기온 {temp_min}°C ~ {temp_max}°C 입니다."
             )
             
@@ -104,17 +123,6 @@ def get_date_weather_summary(location: str, date: str) -> str:
     except Exception as e:
         return f"OWM (특정 날짜) 오류: {str(e)}"
 
-# '특정 날짜 예보'용 Tool 래핑
-future_weather_tool = Tool.from_function(
-    func=get_date_weather_summary,
-    name="get_date_weather_summary",
-    description=(
-        "사용자가 '내일', '모레' 또는 '특정 날짜'의 날씨 예보를 물어볼 때 사용됩니다. "
-        "위치(location)와 날짜(date, 'YYYY-MM-DD' 형식) 인자가 모두 필요합니다. "
-        "LLM은 '내일' 같은 상대적 날짜를 'YYYY-MM-DD'로 변환해야 합니다."
-    )
-)
-
 
 # --- 3. 사고 통계 도구 (Tool 3) ---
 db_instance = get_db_langchain()
@@ -125,7 +133,17 @@ sql_agent_executor = create_sql_agent(
     verbose=True,
     handle_parsing_errors=True
 )
-def run_sql_agent(query: str) -> str:
+
+@tool
+def jeju_safety_statistics_db(query: str) -> str:
+    """
+    제주도 관광객 안전 사고 통계(DB)에 대한 질문에 답할 때 사용됩니다.
+    예: '낙상 사고 건수', '제주시 사고 다발 장소', '겨울철 사고 유형' 등
+    질문 전체를 입력으로 전달해야 합니다.
+    
+    Args:
+        query (str): SQL 에이전트에게 전달할 원본 사용자 질문
+    """
     print(f"[Tool] SQL Agent 도구 호출됨: {query}")
     try:
         result = sql_agent_executor.invoke({"input": query})
@@ -133,16 +151,6 @@ def run_sql_agent(query: str) -> str:
     except Exception as e:
         print(f"[Tool] SQL Agent 오류: {str(e)}")
         return f"SQL 데이터베이스 조회 중 오류 발생: {str(e)}"
-
-safety_sql_tool = Tool(
-    name="jeju_safety_statistics_db",
-    func=run_sql_agent,
-    description=(
-        "제주도 관광객 안전 사고 통계(DB)에 대한 질문에 답할 때 사용됩니다. "
-        "예: '낙상 사고 건수', '제주시 사고 다발 장소', '겨울철 사고 유형' 등 "
-        "질문 전체를 입력으로 전달해야 합니다."
-    )
-)
 
 
 # --- 4. 관광정보 RAG 도구 (Tool 4) ---
@@ -173,15 +181,27 @@ rag_chain = (
 )
 
 # RAG 체인을 Tool로 포장
-tourism_rag_tool = Tool(
-    name="jeju_tourism_rag_search",
-    func=rag_chain.invoke, # RAG 체인을 직접 실행
-    description=(
-        "제주도 관광 명소, 오름, 향토 음식, 한류 컨텐츠 등 일반적인 관광 정보에 대한 질문에 답할 때 사용됩니다. "
-        "(예: '제주도 오름 추천해줘', '제주 향토음식이 뭐야?') "
-        "질문 전체를 입력으로 전달해야 합니다."
-    )
-)
+@tool
+def jeju_tourism_rag_search(query: str) -> str:
+    """
+    제주도 관광 명소, 오름, 향토 음식, 한류 컨텐츠 등 일반적인 관광 정보에 대한 질문에 답할 때 사용됩니다.
+    (예: '제주도 오름 추천해줘', '제주 향토음식이 뭐야?')
+    질문 전체를 입력으로 전달해야 합니다.
+    
+    Args:
+        query (str): RAG 시스템에 전달할 원본 사용자 질문
+    """
+    print(f"[Tool] RAG 도구 호출됨: {query}")
+    try:
+        return rag_chain.invoke(query)
+    except Exception as e:
+        print(f"[Tool] RAG 오류: {str(e)}")
+        return f"RAG 조회 중 오류 발생: {str(e)}"
 
 # --- 도구 리스트 ---
-all_tools = [today_weather_tool, future_weather_tool, safety_sql_tool, tourism_rag_tool]
+all_tools = [
+    get_current_weather, 
+    get_date_weather_summary, 
+    jeju_safety_statistics_db, 
+    jeju_tourism_rag_search
+]
