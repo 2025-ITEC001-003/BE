@@ -4,7 +4,6 @@ from langchain_community.agent_toolkits import create_sql_agent
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
-from pydantic import BaseModel, Field
 
 from src.core import get_db_langchain, OPENWEATHER_API_KEY, llm, get_compression_retriever
 from src.data_loader import get_jeju_coordinates

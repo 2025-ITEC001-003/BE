@@ -15,7 +15,6 @@ from langchain.retrievers.document_compressors.base import DocumentCompressorPip
 from langchain.retrievers.document_compressors.embeddings_filter import EmbeddingsFilter
 from langchain_community.document_transformers import EmbeddingsRedundantFilter
 
-
 # .env 파일 로드
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -29,7 +28,7 @@ os.environ["OPENWEATHER_API_KEY"] = OPENWEATHER_API_KEY
 # llm
 llm = ChatOpenAI(model="gpt-4-turbo", temperature=0, api_key=OPENAI_API_KEY)
 
-# --- PostgreDB 싱글톤 ---
+# # --- PostgreDB 싱글톤 (기존) ---
 engine = create_engine(DATABASE_URL)
 _db_langchain= None
 
@@ -96,7 +95,7 @@ def get_bm25_retriever():
         return _bm25_retriever_instance
 
     print("Initializing BM25Retriever (Loading PDF docs)...")
-
+    
     # 1. 'src/core.py' 파일 기준으로 'data' 폴더 절대 경로 계산
     CURRENT_FILE_PATH = os.path.abspath(__file__)
     SRC_DIR = os.path.dirname(CURRENT_FILE_PATH)
