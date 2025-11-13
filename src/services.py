@@ -6,12 +6,8 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import ChatOpenAI
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 
-from src.core import OPENAI_API_KEY
+from src.core import OPENAI_API_KEY, llm
 from src.tools import all_tools
-
-
-# 메인 LLM 초기화
-llm = ChatOpenAI(model="gpt-4-turbo", temperature=0, api_key=OPENAI_API_KEY)
 
 # 메인 Agent용 프롬프트
 VALID_LOCATIONS_LIST = "['제주시', '서귀포시', '애월읍', '한림읍', '성산읍', '안덕면', '조천읍', '구좌읍']"
