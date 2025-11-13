@@ -4,8 +4,9 @@ from langchain_community.agent_toolkits import create_sql_agent
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
+from langchain_openai import ChatOpenAI
 
-from src.core import get_db_langchain, OPENWEATHER_API_KEY, llm, get_compression_retriever
+from src.core import get_db_langchain, OPENWEATHER_API_KEY, llm, get_compression_retriever, OPENAI_API_KEY
 from src.data_loader import get_jeju_coordinates
 
 # --- 1. '오늘/현재' 날씨 도구 (Tool 1 - OWM) ---
@@ -175,7 +176,7 @@ def format_docs(docs):
 rag_chain = (
     {"context": compression_retriever | format_docs, "question": RunnablePassthrough()}
     | prompt_rag
-    | llm
+    | ChatOpenAI(model="gpt-5-mini", temperature=0, api_key=OPENAI_API_KEY)
     | StrOutputParser()
 )
 

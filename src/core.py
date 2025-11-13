@@ -26,7 +26,7 @@ os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 os.environ["OPENWEATHER_API_KEY"] = OPENWEATHER_API_KEY
 
 # llm
-llm = ChatOpenAI(model="gpt-5-mini", temperature=1, api_key=OPENAI_API_KEY)
+llm = ChatOpenAI(model="gpt-4.1", temperature=1, api_key=OPENAI_API_KEY)
 
 # # --- PostgreDB 싱글톤 (기존) ---
 engine = create_engine(DATABASE_URL)
