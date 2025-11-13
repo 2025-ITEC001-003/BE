@@ -5,7 +5,6 @@ from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import ChatOpenAI
 from langchain.agents import AgentExecutor, create_tool_calling_agent
-from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 
 from src.core import OPENAI_API_KEY
 from src.tools import all_tools
@@ -117,23 +116,14 @@ async def get_agent_response(query: str, session_id: str) -> str:
     """사용자 질문과 세션ID를 받아 Agent를 실행하고 답변을 반환"""
     print(f"서비스: [세션: {session_id}] \"{query}\" 질문 처리 시작")
 
-    # 해당 세션의 대화 기록 가져오기
-    if session_id not in chat_history_store:
-        chat_history_store[session_id] = ChatMessageHistory()
-    chat_history = chat_history_store[session_id]
-
     try:
         # 메인 Agent 실행
-        response = await main_agent_executor.ainvoke({
-            "input": query,
-            "chat_history": chat_history.messages
-        })
+        response = await agent_with_history.ainvoke(
+            {"input": query},
+            config={"configurable": {"session_id": session_id}} 
+        )
         
         answer = response.get("output", "답변 생성 실패")
-
-        # 대화 기록에 현재 질문과 답변 추가
-        chat_history.add_user_message(query)
-        chat_history.add_ai_message(answer)
         
     except Exception as e:
         print(f"[Main Agent 오류] {e}")
@@ -143,37 +133,50 @@ async def get_agent_response(query: str, session_id: str) -> str:
 
 async def stream_agent_response(query: str, session_id: str):
     """
-    Agent의 응답을 비동기 생성기(async generator)로 스트리밍합니다.
+    Agent의 최종 응답만 스트리밍 (내부 추론 과정 제외)
     """
     print(f"스트리밍 서비스: [세션: {session_id}] \"{query}\" 처리 시작")
 
-    # 대화 기록 가져오기
-    if session_id not in chat_history_store:
-        chat_history_store[session_id] = ChatMessageHistory()
-    chat_history = chat_history_store[session_id]
-
-    # 스트리밍 실행
-    full_answer = ""
+    # 추론 과정 필터링을 위한 플래그
+    is_final_response = False
+    tool_depth = 0  # 중첩된 도구 호출 깊이 추적
+    
     try:
-        # main_agent_executor.ainvoke 대신 .astream_events 사용
         async for event in agent_with_history.astream_events(
             {"input": query},
-            # ⬇️ 'session_id'는 config로 전달
             config={"configurable": {"session_id": session_id}},
-            version="v1" # 이벤트 스트림 버전 v1 사용
+            version="v1" 
         ):
             kind = event["event"]
-
-            # LLM이 생성하는 응답 스트림(토큰)만 필터링
-            if kind == "on_chat_model_stream":
-                chunk = event["data"].get("chunk")
-                # AIMessageChunk의 content만 추출
-                if isinstance(chunk, AIMessage) and chunk.content:
-                    content = chunk.content
-                    if isinstance(content, str):
-                        yield content # 청크를 즉시 반환(yield)
             
+            # 1. 도구 호출 깊이 추적 (중첩된 SQL Agent 등 감지)
+            if kind == "on_tool_start":
+                tool_depth += 1
+            elif kind == "on_tool_end":
+                tool_depth -= 1
+            
+            # 2. AgentExecutor가 최종 응답 생성을 시작하는 시점 감지
+            if kind == "on_chain_start":
+                name = event.get("name", "")
+                # AgentExecutor의 최종 LLM 호출 시작점
+                if name == "AgentExecutor" and tool_depth == 0:
+                    is_final_response = True
+            
+            # 3. LLM 토큰 필터링
+            if kind == "on_chat_model_stream":
+                # 도구 실행 중이 아니고, 최종 응답 단계일 때만 전송
+                if tool_depth == 0:
+                    chunk = event["data"].get("chunk")
+                    if isinstance(chunk, AIMessage) and chunk.content:
+                        content = chunk.content
+                        if isinstance(content, str):
+                            # Agent의 내부 사고 과정 제외
+                            # (Thought:, Action:, Observation: 등이 포함된 청크 필터링)
+                            if not any(keyword in content for keyword in 
+                                      ["Thought:", "Action:", "Action Input:", 
+                                       "Observation:", "Final Answer:"]):
+                                yield content
+
     except Exception as e:
         print(f"[Streaming Agent 오류] {e}")
-        error_message = "죄송합니다. 내부 오류가 발생했습니다."
-        yield error_message
+        yield "죄송합니다. 내부 오류가 발생했습니다."
