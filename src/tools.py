@@ -176,7 +176,7 @@ def format_docs(docs):
 rag_chain = (
     {"context": compression_retriever | format_docs, "question": RunnablePassthrough()}
     | prompt_rag
-    | ChatOpenAI(model="gpt-5-mini", temperature=0, api_key=OPENAI_API_KEY)
+    | ChatOpenAI(model="gpt-5-mini", temperature=1, api_key=OPENAI_API_KEY)
     | StrOutputParser()
 )
 
