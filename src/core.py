@@ -1,14 +1,13 @@
 import os
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from langchain_community.utilities import SQLDatabase
 from langchain_openai import ChatOpenAI
 from langchain.storage import LocalFileStore
 from langchain.embeddings import CacheBackedEmbeddings
 from langchain_openai import OpenAIEmbeddings
 from langchain_postgres import PGVector
-from langchain_community.document_loaders import UnstructuredPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
 from langchain_community.retrievers import BM25Retriever
 from langchain.retrievers import ContextualCompressionRetriever, EnsembleRetriever
 from langchain.retrievers.document_compressors.base import DocumentCompressorPipeline
@@ -83,51 +82,51 @@ def get_vector_store():
     return _vector_store_instance
 
 # --- BM25 Retriever 싱글톤 ---
-#TODO: 실제 서비스에서는 이 로드/분할 과정을 캐시해야 합니다.
 _bm25_retriever_instance = None
 def get_bm25_retriever():
     """
     BM25Retriever 싱글톤 객체를 반환합니다.
-    최초 호출 시 PDF 문서를 로드하고 인-메모리 인덱스를 생성합니다.
+    최초 호출 시 DB(PGVector)에 저장된 원본 텍스트를 로드하여
+    인-메모리 키워드 인덱스를 생성합니다.
     """
     global _bm25_retriever_instance
     if _bm25_retriever_instance is not None:
         return _bm25_retriever_instance
 
-    print("Initializing BM25Retriever (Loading PDF docs)...")
+    print("Initializing BM25Retriever (from PGVector's stored documents)...")
     
-    # 1. 'src/core.py' 파일 기준으로 'data' 폴더 절대 경로 계산
-    CURRENT_FILE_PATH = os.path.abspath(__file__)
-    SRC_DIR = os.path.dirname(CURRENT_FILE_PATH)
-    PROJECT_ROOT = os.path.dirname(SRC_DIR)
-    DOCS_DIR = os.path.join(PROJECT_ROOT, "data", "tourism_docs")
-
-    doc_paths = [
-        os.path.join(DOCS_DIR, "제주공식관광가이드북.pdf"),
-        os.path.join(DOCS_DIR, "제주한류컨텐츠.pdf"),
-        os.path.join(DOCS_DIR, "제주향토음식.pdf"),
-        os.path.join(DOCS_DIR, "제주오름.pdf"),
-    ]
+    # 1. PDF 로드 로직을 DB 쿼리 로직으로 대체
+    sql_query = f"""
+        SELECT document, cmetadata 
+        FROM langchain_pg_embedding
+        WHERE collection_id = (
+            SELECT uuid FROM langchain_pg_collection WHERE name = '{COLLECTION_NAME}'
+        );
+    """
     
-    all_docs = []
-    for path in doc_paths:
-        if os.path.exists(path):
-            loader = UnstructuredPDFLoader(path, languages=["kor"])
-            all_docs.extend(loader.load())
-        else:
-            print(f"BM25 Warning: {path} 파일을 찾을 수 없습니다.")
+    splits_from_db = []
+    try:
+        # 1-2. SQLAlchemy engine을 사용하여 DB에서 직접 로드
+        with engine.connect() as connection:
+            results = connection.execute(text(sql_query))
+            for row in results:
+                # 1-3. (text, metadata)를 LangChain 'Document' 객체로 변환
+                splits_from_db.append(Document(page_content=row[0], metadata=row[1]))
+        
+        print(f"BM25: Found and loaded {len(splits_from_db)} chunks from DB.")
 
-    # 2. 청크 분할
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    splits = text_splitter.split_documents(all_docs)
+    except Exception as e:
+        print(f"❌ BM25 Error: DB에서 청크를 로드하는 데 실패했습니다: {e}")
+        print("BM25 리트리버를 비활성화합니다.")
+        _bm25_retriever_instance = BM25Retriever.from_documents([], k=3)
+        return _bm25_retriever_instance
 
-    if not splits:
-        print("❌ BM25 Error: 로드된 문서가 없어 'splits'가 비어있습니다.")
-        # 빈 리스트로 임시 초기화 (오류 방지)
+    # 2. DB에서 가져온 'splits_from_db' 리스트로 인덱스 생성
+    if not splits_from_db:
+        print("❌ BM25 Error: DB에 문서가 없어 'splits'가 비어있습니다.")
         _bm25_retriever_instance = BM25Retriever.from_documents([], k=3)
     else:
-        # 3. 인-메모리 인덱스 생성 및 저장
-        _bm25_retriever_instance = BM25Retriever.from_documents(splits, k=3)
+        _bm25_retriever_instance = BM25Retriever.from_documents(splits_from_db, k=3)
     
     print("BM25Retriever initialization complete.")
     return _bm25_retriever_instance
