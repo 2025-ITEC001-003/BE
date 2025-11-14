@@ -12,7 +12,7 @@ from langchain_community.retrievers import BM25Retriever
 from langchain.retrievers import ContextualCompressionRetriever, EnsembleRetriever
 from langchain.retrievers.document_compressors.base import DocumentCompressorPipeline
 from langchain.retrievers.document_compressors.embeddings_filter import EmbeddingsFilter
-from langchain_community.document_transformers import EmbeddingsRedundantFilter
+from langchain_community.document_transformers import EmbeddingsRedundantFilter, LongContextReorder
 
 # .env 파일 로드
 load_dotenv()
@@ -164,10 +164,12 @@ def get_compression_retriever():
         embeddings=cached_embedder,
         similarity_threshold=0.7 
     )
+
+    reorder_transformer = LongContextReorder()
     
     # 4. 압축 파이프라인 생성
     pipeline_compressor = DocumentCompressorPipeline(
-        transformers=[redundant_filter, relevance_filter]
+        transformers=[redundant_filter, relevance_filter, reorder_transformer]
     )
     
     # 5. 최종 압축 리트리버 생성 및 저장
