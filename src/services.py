@@ -3,7 +3,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
-from langchain_openai import ChatOpenAI
+from langchain.memory import ConversationSummaryBufferMemory
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 
 from src.core import OPENAI_API_KEY, llm
@@ -93,29 +93,41 @@ main_agent_executor = AgentExecutor(
 # (세션 ID별로 대화 기록을 저장할 휘발성 인메모리 저장소)
 chat_history_store = {}
 
-def get_session_history(session_id: str) -> ChatMessageHistory:
-    """세션 ID를 기반으로 메모리에서 ChatMessageHistory 객체를 가져옵니다."""
+def get_session_history(session_id: str) -> ConversationSummaryBufferMemory:
     if session_id not in chat_history_store:
-        chat_history_store[session_id] = ChatMessageHistory()
+        chat_history_store[session_id] = ConversationSummaryBufferMemory(
+            llm=llm, # 요약에 사용할 LLM
+            max_token_limit=1000, # 요약 임계값
+            return_messages=True, # 메시지 객체 리스트로 반환
+            memory_key="chat_history",
+            input_key="input"
+        )
     return chat_history_store[session_id]
 
 # Agent와 기록 관리자 래핑(Wrapping)
-agent_with_history = RunnableWithMessageHistory(
-    main_agent_executor,
-    get_session_history,
-    input_messages_key="input",
-    history_messages_key="chat_history",
-)
 
 # 비즈니스 로직 함수 (API가 호출)
 async def get_agent_response(query: str, session_id: str) -> str:
     """사용자 질문과 세션ID를 받아 Agent를 실행하고 답변을 반환"""
     print(f"서비스: [세션: {session_id}] \"{query}\" 질문 처리 시작")
 
+    memory = get_session_history(session_id)
+
+    # 현재 메모리에서 대화 기록 로드
+    # (이 과정에서 필요시 '자동 요약'이 발생함)
+    # .load_memory_variables()는 동기 함수이므로 await 제거
+    memory_variables = memory.load_memory_variables({})
+    recent_messages = memory_variables.get("chat_history", []) # memory_key="chat_history"
+
+    answer = ""
+
     try:
         # 메인 Agent 실행
-        response = await agent_with_history.ainvoke(
-            {"input": query},
+        response = await main_agent_executor.ainvoke(
+            {
+                "input": query,
+                "chat_history": recent_messages
+            },
             config={"configurable": {"session_id": session_id}} 
         )
         
@@ -125,6 +137,16 @@ async def get_agent_response(query: str, session_id: str) -> str:
         print(f"[Main Agent 오류] {e}")
         answer = "죄송합니다. 내부 오류가 발생했습니다."
 
+    finally:
+        # 대화 기록 수동 저장
+        # (이 과정에서 필요시 '자동 요약'이 발생함)
+        if answer:
+            # .save_context()는 동기 함수이므로 await 제거
+            memory.save_context(
+                {"input": query}, 
+                {"output": answer}
+            )
+
     return answer
 
 async def stream_agent_response(query: str, session_id: str):
@@ -133,13 +155,26 @@ async def stream_agent_response(query: str, session_id: str):
     """
     print(f"스트리밍 서비스: [세션: {session_id}] \"{query}\" 처리 시작")
 
+    memory = get_session_history(session_id)
+
+    # 현재 메모리에서 대화 기록 로드
+    # (이 과정에서 필요시 '자동 요약'이 발생함)
+    # .load_memory_variables()는 동기 함수이므로 await 제거
+    memory_variables = memory.load_memory_variables({})
+    recent_messages = memory_variables.get("chat_history", []) # memory_key="chat_history"
+
+    full_answer = ""
+
     # 추론 과정 필터링을 위한 플래그
     is_final_response = False
     tool_depth = 0  # 중첩된 도구 호출 깊이 추적
     
     try:
-        async for event in agent_with_history.astream_events(
-            {"input": query},
+        async for event in main_agent_executor.astream_events(
+            {
+                "input": query,
+                "chat_history": recent_messages
+            },
             config={"configurable": {"session_id": session_id}},
             version="v1" 
         ):
@@ -171,8 +206,20 @@ async def stream_agent_response(query: str, session_id: str):
                             if not any(keyword in content for keyword in 
                                       ["Thought:", "Action:", "Action Input:", 
                                        "Observation:", "Final Answer:"]):
+                                full_answer += content
                                 yield content
 
     except Exception as e:
         print(f"[Streaming Agent 오류] {e}")
-        yield "죄송합니다. 내부 오류가 발생했습니다."
+        full_answer = "죄송합니다. 내부 오류가 발생했습니다."
+        yield full_answer
+    
+    finally:
+        # 대화 기록 수동 저장
+        # (이 과정에서 필요시 '자동 요약'이 발생함)
+        if full_answer:
+            # .save_context()는 동기 함수이므로 await 제거
+            memory.save_context(
+                {"input": query}, 
+                {"output": full_answer}
+            )
