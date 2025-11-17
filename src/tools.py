@@ -6,7 +6,7 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
 
-from src.core import get_db_langchain, OPENWEATHER_API_KEY, llm, get_compression_retriever, OPENAI_API_KEY
+from src.core import get_db_langchain, OPENWEATHER_API_KEY, llm_default, get_compression_retriever
 from src.data_loader import get_jeju_coordinates
 
 # --- 1. '오늘/현재' 날씨 도구 (Tool 1 - OWM) ---
@@ -128,7 +128,7 @@ def get_date_weather_summary(location: str, date: str) -> str:
 db_instance = get_db_langchain()
 
 sql_agent_executor = create_sql_agent(
-    llm=llm,
+    llm=llm_default,
     db=db_instance,
     verbose=True,
     handle_parsing_errors=True
@@ -176,7 +176,7 @@ def format_docs(docs):
 rag_chain = (
     {"context": compression_retriever | format_docs, "question": RunnablePassthrough()}
     | prompt_rag
-    | ChatOpenAI(model="gpt-5-mini", temperature=1, api_key=OPENAI_API_KEY)
+    | llm_default
     | StrOutputParser()
 )
 

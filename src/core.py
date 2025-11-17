@@ -24,8 +24,22 @@ OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 os.environ["OPENWEATHER_API_KEY"] = OPENWEATHER_API_KEY
 
-# llm
-llm = ChatOpenAI(model="gpt-4.1", temperature=0, api_key=OPENAI_API_KEY)
+# llm_default : ConversationSummaryBufferMemory 요약, sql_agent, RAG용 llm (stream option 미포함)
+llm_default = ChatOpenAI(
+    model="gpt-4.1-mini",
+    temperature=1,
+    api_key=OPENAI_API_KEY
+)
+
+# llm_streaming : 메인 스트리밍 Agent용 (토큰 추적 옵션 포함)
+llm_streaming = ChatOpenAI(
+    model="gpt-4.1", 
+    temperature=0, 
+    api_key=OPENAI_API_KEY,
+    model_kwargs={
+        "stream_options": {"include_usage": True}
+    }
+)
 
 # # --- PostgreDB 싱글톤 (기존) ---
 engine = create_engine(DATABASE_URL)

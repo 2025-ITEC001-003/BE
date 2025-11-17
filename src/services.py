@@ -1,12 +1,10 @@
 import datetime
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import HumanMessage, AIMessage
-from langchain_community.chat_message_histories import ChatMessageHistory
-from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.messages import AIMessage
 from langchain.memory import ConversationSummaryBufferMemory
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 
-from src.core import OPENAI_API_KEY, llm
+from src.core import llm_streaming, llm_default
 from src.tools import all_tools
 
 # 메인 Agent용 프롬프트
@@ -77,7 +75,7 @@ prompt = prompt.partial(
 
 # router agent
 router_agent = create_tool_calling_agent(
-    llm=llm,
+    llm=llm_streaming,
     tools=all_tools,
     prompt=prompt
 )
@@ -96,7 +94,7 @@ chat_history_store = {}
 def get_session_history(session_id: str) -> ConversationSummaryBufferMemory:
     if session_id not in chat_history_store:
         chat_history_store[session_id] = ConversationSummaryBufferMemory(
-            llm=llm, # 요약에 사용할 LLM
+            llm=llm_default, # 요약에 사용할 LLM
             max_token_limit=1000, # 요약 임계값
             return_messages=True, # 메시지 객체 리스트로 반환
             memory_key="chat_history",
