@@ -5,12 +5,22 @@ from src.services import get_agent_response
 from fastapi.responses import StreamingResponse
 import json
 from src.services import stream_agent_response
+from src.application.kakao import router as kakao_router
+from src.application.user import router as user_router # user 라우터 import
+
+# DB 초기화 관련
+from src.database import engine, Base
+import src.models
+
+# 애플리케이션 시작 시 DB 테이블 생성
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="JeSafe 챗봇 API",
     description="제주 관광 안전 사고 통계 챗봇",
 )
 
+# AI 관련 API
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """챗봇 질의응답 엔드포인트"""
@@ -46,6 +56,9 @@ async def sse_format_generator(query: str, session_id: str):
 def read_root():
     return {"message": "Welcome to JeSafe API"}
 
-# (선택) 개발용 uvicorn 직접 실행
+app.include_router(kakao_router.router, prefix="/api")
+app.include_router(user_router.router, prefix="/api")
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
