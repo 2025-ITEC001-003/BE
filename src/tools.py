@@ -4,7 +4,7 @@ from langchain_community.agent_toolkits import create_sql_agent
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
-from langchain_openai import ChatOpenAI
+from ddgs import DDGS
 
 from src.core import get_db_langchain, OPENWEATHER_API_KEY, llm_default, get_compression_retriever
 from src.data_loader import get_jeju_coordinates
@@ -154,6 +154,7 @@ def jeju_safety_statistics_db(query: str) -> str:
 
 
 # --- 4. 관광정보 RAG 도구 (Tool 4) ---
+# 4-1 RAG 체인
 rag_prompt_template = """
 당신은 제주 관광 전문가입니다. 오직 다음 '컨텍스트' 정보만을 기반으로 사용자의 질문에 답변해야 합니다.
 컨텍스트에 답변이 없다면 "죄송합니다, 요청하신 정보는 찾을 수 없습니다."라고 답변하세요.
@@ -169,13 +170,54 @@ prompt_rag = ChatPromptTemplate.from_template(rag_prompt_template)
 # 앙상블 리트리버 + 문서 압축기 리트리버
 compression_retriever = get_compression_retriever()
 
-# RAG 체인(Chain) 결합
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
-rag_chain = (
+local_rag_chain = (
     {"context": compression_retriever | format_docs, "question": RunnablePassthrough()}
     | prompt_rag
+    | llm_default
+    | StrOutputParser()
+)
+
+# 4-2 웹 검색 체인
+def run_ddgs_search(query: str) -> str:
+    """
+    ddgs 라이브러리를 사용해 웹 검색을 수행하고,
+    상위 3개 결과의 요약(snippet)을 반환합니다.
+    """
+    print(f"[Tool] DDGS Web Search: {query}")
+    try:
+        # backend='api' 경고가 발생하지 않는 최신 방식 사용
+        # 상위 3개 결과를 가져와 컨텍스트로 사용
+        results = DDGS().text(query, max_results=3)
+        if not results:
+            return "웹에서 관련 정보를 찾을 수 없습니다."
+
+        # 3개 결과의 요약본(body)을 결합하여 반환
+        snippets = [r.get('body', '') for r in results]
+        return "\n\n".join(snippets)
+
+    except Exception as e:
+        print(f"[Tool] DDGS Search Error: {e}")
+        return "웹 검색 중 오류가 발생했습니다."
+
+web_rag_prompt_template = """
+당신은 유능한 검색 어시스턴트입니다. '로컬 문서'에 정보가 없어서 웹 검색을 수행했습니다.
+오직 다음 '웹 검색 컨텍스트' 정보만을 기반으로 사용자의 질문에 답변해야 합니다.
+웹 검색 결과에도 답변이 없다면 "웹에서도 관련 정보를 찾을 수 없습니다."라고 답변하세요.
+
+[웹 검색 컨텍스트]
+{context}
+
+[질문]
+{question}
+"""
+web_prompt_rag = ChatPromptTemplate.from_template(web_rag_prompt_template)
+
+web_rag_chain = (
+    {"context": run_ddgs_search, "question": RunnablePassthrough()}
+    | web_prompt_rag
     | llm_default
     | StrOutputParser()
 )
@@ -185,18 +227,48 @@ rag_chain = (
 def jeju_tourism_rag_search(query: str) -> str:
     """
     제주도 관광 명소, 오름, 향토 음식, 한류 컨텐츠 등 일반적인 관광 정보에 대한 질문에 답할 때 사용됩니다.
-    (예: '제주도 오름 추천해줘', '제주 향토음식이 뭐야?')
-    질문 전체를 입력으로 전달해야 합니다.
+    이 도구는 먼저 로컬 문서를 검색하고, 정보가 없으면 자동으로 웹 검색을 시도합니다.
+    (예: '제주도 오름 추천해줘', '애월읍 최신 축제 정보')
     
     Args:
         query (str): RAG 시스템에 전달할 원본 사용자 질문
     """
     print(f"[Tool] RAG 도구 호출됨: {query}")
+    
     try:
-        return rag_chain.invoke(query)
+        # 1. (시도) 압축 리트리버를 먼저 실행
+        print("[RAG] 1. 로컬 문서 검색 시도...")
+        # (Ensemble -> RedundantFilter -> RelevanceFilter -> LongContextReorder(긴 문맥 재정렬) 실행)
+        docs = compression_retriever.invoke(query)
+
+        # 2. (판단) 필터링된 문서가 있는지 확인
+        if not docs:
+            # RelevanceFilter가 모든 문서를 '관련 없음'으로 판단
+            print("[RAG] 1-1. 로컬 문서에 유효한 정보 없음. 웹 검색으로 대체.")
+            raise ValueError("No relevant documents found in local RAG.")
+        
+        # 3. (RAG 성공) 필터링된 문서로 답변 생성
+        print(f"[RAG] 1-2. 로컬 문서 {len(docs)}개 청크로 답변 생성.")
+        # local_rag_chain을 실행 (이미 리트리버가 실행되었으므로 수동 주입)
+        generation_chain = (
+            prompt_rag
+            | llm_default
+            | StrOutputParser()
+        )
+        return generation_chain.invoke({
+            "context": format_docs(docs),
+            "question": query
+        })
+
     except Exception as e:
-        print(f"[Tool] RAG 오류: {str(e)}")
-        return f"RAG 조회 중 오류 발생: {str(e)}"
+        # 4. (RAG 실패 / Fallback) 웹 검색 실행
+        print(f"[RAG] 2. RAG 오류({e}) 발생. 웹 검색으로 대체 실행.")
+        try:
+            return web_rag_chain.invoke(query)
+        except Exception as web_e:
+            print(f"[Tool] Web Search 오류: {web_e}")
+            return f"RAG 및 웹 검색 중 오류 발생: {web_e}"
+
 
 # --- 도구 리스트 ---
 all_tools = [

@@ -176,7 +176,7 @@ def get_compression_retriever():
     )
     relevance_filter = EmbeddingsFilter(
         embeddings=cached_embedder,
-        similarity_threshold=0.7 
+        similarity_threshold=0.85 #테스트 결과에 따른 임계값 조정
     )
 
     reorder_transformer = LongContextReorder()
