@@ -19,35 +19,43 @@ class KakaoService:
         self.kakao_token_uri = "https://kauth.kakao.com/oauth/token"
         self.kakao_user_info_uri = "https://kapi.kakao.com/v2/user/me"
 
-    async def login(self, code: str) -> Tuple[str, bool, str | None]:
+    async def login(self, code: str) -> Tuple[str, bool, User]:
         access_token = await self._get_kakao_access_token(code)
         user_info = await self._get_kakao_user_info(access_token)
 
         kakao_id = user_info["id"]
         nickname = user_info.get("properties", {}).get("nickname")
 
-        is_new_user = False
         user = self.db.query(User).filter(User.kakao_id == kakao_id).first()
+        
         if not user:
             is_new_user = True
             user = User(kakao_id=kakao_id, nickname=nickname)
             self.db.add(user)
             self.db.commit()
             self.db.refresh(user)
-        elif user.nickname != nickname:
-            user.nickname = nickname
-            self.db.commit()
+        else:
+            is_new_user = False
+            # For existing users, if the nickname has changed, update it.
+            if user.nickname != nickname:
+                user.nickname = nickname
+                self.db.commit()
+            
+            # CRITICAL FIX: Re-fetch the user object directly from the database.
+            # This ensures that we get the complete and latest user data,
+            # including all profile fields like birth_year, gender, etc.
+            user = self.db.query(User).filter(User.kakao_id == kakao_id).first()
 
         payload = {
             "sub": str(user.id),
             "exp": datetime.utcnow() + timedelta(days=30),
             "iat": datetime.utcnow(),
             "provider": "kakao",
-            "nickname": nickname,
+            "nickname": user.nickname,
         }
 
         app_token = jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
-        return app_token, is_new_user, nickname
+        return app_token, is_new_user, user
 
     async def _get_kakao_access_token(self, code: str) -> str:
         headers = {"Content-type": "application/x-www-form-urlencoded;charset=utf-8"}
