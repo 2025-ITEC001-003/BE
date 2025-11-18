@@ -10,3 +10,5 @@ class User(Base):
     birth_year = Column(String, nullable=True)
     gender = Column(String, nullable=True)
     disease_info = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    email = Column(String, nullable=True)
