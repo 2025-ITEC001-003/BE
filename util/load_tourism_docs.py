@@ -70,7 +70,15 @@ print(f"\n🚀 {len(files_to_process)}개 파일 처리를 시작합니다...")
 
 parser = LlamaParse(
     api_key=os.getenv("LLAMA_CLOUD_API_KEY"),
-    result_type="markdown", # 마크다운 형식은 유지 (표 처리 등을 위해 여전히 유용함)
+    parse_mode="parse_page_with_agent", # 고성능 VLM(Vision Model) 기반 분석 모드
+    # 현재 LlamaCloud는 'gpt-4o' 등 최신 VLM을 내부적으로 사용하여 이 파라미터는 유도용입니다.
+    model="openai-gpt-4-1-mini", 
+    high_res_ocr=True,          # 고해상도 OCR 활성화 (정확한 텍스트 경계 인식)
+    adaptive_long_table=True,   # 여러 페이지에 걸친 긴 테이블 구조 분석 강화
+    outlined_table_extraction=True, # 테두리가 명확한 표 추출 강화
+    output_tables_as_HTML=True, # 마크다운 내부에서 표를 HTML로 출력 (LLM이 표 구조를 더 잘 인식하도록 유도)
+    precise_bounding_box=True, # 정밀한 경계선 추출 활성화
+    result_type="markdown",
     num_workers=4,
     verbose=True,
     language="ko"
@@ -103,7 +111,7 @@ for i, docs_in_file in enumerate(reader.iter_data()):
     if not docs_in_file:
         continue
 
-    # ⬇️ (핵심 수정) os.path 안 쓰고 LlamaIndex 메타데이터 활용하기
+    # LlamaIndex 메타데이터 활용
     # docs_in_file[0]에는 이미 파일 정보가 들어있습니다.
     first_doc_meta = docs_in_file[0].metadata
     file_path = first_doc_meta.get("file_path", "")
