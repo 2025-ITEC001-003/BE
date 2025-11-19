@@ -13,6 +13,8 @@ from langchain.retrievers import ContextualCompressionRetriever, EnsembleRetriev
 from langchain.retrievers.document_compressors.base import DocumentCompressorPipeline
 from langchain.retrievers.document_compressors.embeddings_filter import EmbeddingsFilter
 from langchain_community.document_transformers import EmbeddingsRedundantFilter, LongContextReorder
+from util.stopwords import get_korean_stopwords
+from src.kiwi_tokenizer import KiwiBM25Tokenizer
 
 # .env 파일 로드
 load_dotenv()
@@ -97,6 +99,19 @@ def get_vector_store():
 
 # --- BM25 Retriever 싱글톤 ---
 _bm25_retriever_instance = None
+_korean_bm25_tokenizer = None 
+
+def get_korean_bm25_tokenizer():
+    """불용어를 로드하고 KiwiBM25Tokenizer를 초기화하는 싱글톤 함수"""
+    global _korean_bm25_tokenizer
+    if _korean_bm25_tokenizer is not None:
+        return _korean_bm25_tokenizer
+
+    korean_stopwords = get_korean_stopwords()
+    _korean_bm25_tokenizer = KiwiBM25Tokenizer(stop_words=korean_stopwords)
+    print(f"✅ BM25 Tokenizer 초기화 완료. 불용어 {len(korean_stopwords)}개 적용됨.")
+    return _korean_bm25_tokenizer
+
 def get_bm25_retriever():
     """
     BM25Retriever 싱글톤 객체를 반환합니다.
@@ -140,7 +155,11 @@ def get_bm25_retriever():
         print("❌ BM25 Error: DB에 문서가 없어 'splits'가 비어있습니다.")
         _bm25_retriever_instance = BM25Retriever.from_documents([], k=3)
     else:
-        _bm25_retriever_instance = BM25Retriever.from_documents(splits_from_db, k=3)
+        _bm25_retriever_instance = BM25Retriever.from_documents(
+            splits_from_db, 
+            k=3,
+            custom_tokenizer=get_korean_bm25_tokenizer()
+        )
     
     print("BM25Retriever initialization complete.")
     return _bm25_retriever_instance
