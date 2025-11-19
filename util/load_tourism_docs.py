@@ -15,6 +15,14 @@ UTIL_DIR = os.path.dirname(CURRENT_FILE_PATH)
 PROJECT_ROOT = os.path.dirname(UTIL_DIR)
 DOCS_DIR = os.path.join(PROJECT_ROOT, "data", "tourism_docs")
 
+# 로컬 저장 경로 정의
+PROCESSED_DOCS_DIR = os.path.join(PROJECT_ROOT, "data", "processed_docs")
+os.makedirs(PROCESSED_DOCS_DIR, exist_ok=True)
+
+print(f"📄 원본 문서 경로: {DOCS_DIR}")
+print(f"📝 처리 결과 저장 경로: {PROCESSED_DOCS_DIR}")
+
+
 def get_processed_files(collection_name):
     sql = text(f"""
         SELECT DISTINCT cmetadata->>'source' as source
@@ -70,15 +78,14 @@ print(f"\n🚀 {len(files_to_process)}개 파일 처리를 시작합니다...")
 
 parser = LlamaParse(
     api_key=os.getenv("LLAMA_CLOUD_API_KEY"),
-    parse_mode="parse_page_with_agent", # 고성능 VLM(Vision Model) 기반 분석 모드
-    # 현재 LlamaCloud는 'gpt-4o' 등 최신 VLM을 내부적으로 사용하여 이 파라미터는 유도용입니다.
-    model="openai-gpt-4-1-mini", 
-    high_res_ocr=True,          # 고해상도 OCR 활성화 (정확한 텍스트 경계 인식)
-    adaptive_long_table=True,   # 여러 페이지에 걸친 긴 테이블 구조 분석 강화
-    outlined_table_extraction=True, # 테두리가 명확한 표 추출 강화
-    output_tables_as_HTML=True, # 마크다운 내부에서 표를 HTML로 출력 (LLM이 표 구조를 더 잘 인식하도록 유도)
-    precise_bounding_box=True, # 정밀한 경계선 추출 활성화
-    result_type="markdown",
+    parse_mode="parse_page_with_agent",
+    model="openai-gpt-4-1-mini",
+    high_res_ocr=True,
+    adaptive_long_table=True,
+    outlined_table_extraction=True,
+    output_tables_as_HTML=True,
+    precise_bounding_box=True,
+    result_type="markdown", # LlamaParse 결과 유형
     num_workers=4,
     verbose=True,
     language="ko"
@@ -92,10 +99,9 @@ reader = SimpleDirectoryReader(
 
 # 3. Recursive 분할기
 text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000, 
+    chunk_size=1000,
     chunk_overlap=200,
-    # 분할 우선순위: 단락(\n\n) -> 문장(\n) -> 단어( )
-    separators=["\n\n", "\n", " ", ""] 
+    separators=["\n\n", "\n", " ", ""]
 )
 
 # 4. 벡터 스토어 연결
@@ -106,13 +112,11 @@ vector_store = PGVector(
     pre_delete_collection=False
 )
 
-# 5. 파일 단위 처리 (병합 -> Recursive 분할 -> 저장)
+# 5. 파일 단위 처리 (병합 -> Recursive 분할 -> 저장 및 로컬 저장)
 for i, docs_in_file in enumerate(reader.iter_data()):
     if not docs_in_file:
         continue
 
-    # LlamaIndex 메타데이터 활용
-    # docs_in_file[0]에는 이미 파일 정보가 들어있습니다.
     first_doc_meta = docs_in_file[0].metadata
     file_path = first_doc_meta.get("file_path", "")
     raw_filename = first_doc_meta.get("file_name", "unknown")
@@ -123,8 +127,18 @@ for i, docs_in_file in enumerate(reader.iter_data()):
     # 기존 데이터 삭제
     delete_existing_file_data(file_path, COLLECTION_NAME)
 
-    # 텍스트 병합
+    # 텍스트 병합 (LlamaParse의 Markdown 결과)
     full_text = "\n\n".join([doc.text for doc in docs_in_file])
+
+    # LlamaParse Markdown 전체 결과 로컬 저장
+    md_save_path = os.path.join(PROCESSED_DOCS_DIR, f"{title}.md")
+    try:
+        with open(md_save_path, "w", encoding="utf-8") as f:
+            f.write(full_text)
+        print(f"  📝 Markdown 원본 저장 완료: {md_save_path}")
+    except Exception as e:
+        print(f"  ❌ Markdown 원본 저장 실패: {e}")
+
 
     # 메타데이터 구성 및 LangChain Document 생성
     file_metadata = {
@@ -140,11 +154,26 @@ for i, docs_in_file in enumerate(reader.iter_data()):
     # 청크 분할
     final_splits = text_splitter.split_documents([full_doc])
     
-    # DB 저장
+    # 청크 분할 결과 로컬 저장
+    chunks_save_path = os.path.join(PROCESSED_DOCS_DIR, f"{title}_chunks.md")
+    chunk_separator = "\n\n---\n\n"
+    
     if final_splits:
+        try:
+            with open(chunks_save_path, "w", encoding="utf-8") as f:
+                for chunk_index, chunk in enumerate(final_splits):
+                    f.write(f"## CHUNK {chunk_index + 1} (Size: {len(chunk.page_content)} bytes)\n")
+                    f.write(chunk.page_content)
+                    if chunk_index < len(final_splits) - 1:
+                        f.write(chunk_separator)
+            print(f"  ✂️ 청크 결과 저장 완료: {chunks_save_path} ({len(final_splits)} chunks)")
+        except Exception as e:
+            print(f"  ❌ 청크 결과 저장 실패: {e}")
+            
+        # DB 저장
         vector_store.add_documents(final_splits)
-        print(f"  ✅ 저장 완료 ({len(final_splits)} chunks) - Title: {title}")
+        print(f"  ✅ DB 저장 완료 ({len(final_splits)} chunks) - Title: {title}")
     else:
-        print("  ⚠️ 경고: 추출된 텍스트가 없습니다.")
+        print("  ⚠️ 경고: 추출된 텍스트가 없습니다. DB 저장 건너뜀.")
 
 print("\n🎉 모든 작업이 완료되었습니다.")
