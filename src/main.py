@@ -8,12 +8,6 @@ from src.services import stream_agent_response
 from src.application.kakao import router as kakao_router
 from src.application.user import router as user_router # user 라우터 import
 
-# DB 초기화 관련
-from src.database import engine, Base
-import src.models
-
-# 애플리케이션 시작 시 DB 테이블 생성
-Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="JeSafe 챗봇 API",
