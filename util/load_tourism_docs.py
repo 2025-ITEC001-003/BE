@@ -16,12 +16,14 @@ PROJECT_ROOT = os.path.dirname(UTIL_DIR)
 DOCS_DIR = os.path.join(PROJECT_ROOT, "data", "tourism_docs")
 
 # 로컬 저장 경로 정의
-PROCESSED_DOCS_DIR = os.path.join(PROJECT_ROOT, "data", "processed_docs")
-os.makedirs(PROCESSED_DOCS_DIR, exist_ok=True)
+PROCESSED_MD_DIR = os.path.join(PROJECT_ROOT, "data", "processed_md_originals")
+CHUNKS_DIR = os.path.join(PROJECT_ROOT, "data", "processed_chunks_results")
+os.makedirs(PROCESSED_MD_DIR, exist_ok=True)
+os.makedirs(CHUNKS_DIR, exist_ok=True)
 
 print(f"📄 원본 문서 경로: {DOCS_DIR}")
-print(f"📝 처리 결과 저장 경로: {PROCESSED_DOCS_DIR}")
-
+print(f"📝 Markdown 원본 저장 경로: {PROCESSED_MD_DIR}")
+print(f"✂️ 청크 결과 저장 경로: {CHUNKS_DIR}")
 
 def get_processed_files(collection_name):
     sql = text(f"""
@@ -131,7 +133,7 @@ for i, docs_in_file in enumerate(reader.iter_data()):
     full_text = "\n\n".join([doc.text for doc in docs_in_file])
 
     # LlamaParse Markdown 전체 결과 로컬 저장
-    md_save_path = os.path.join(PROCESSED_DOCS_DIR, f"{title}.md")
+    md_save_path = os.path.join(PROCESSED_MD_DIR, f"{title}.md")
     try:
         with open(md_save_path, "w", encoding="utf-8") as f:
             f.write(full_text)
@@ -155,7 +157,7 @@ for i, docs_in_file in enumerate(reader.iter_data()):
     final_splits = text_splitter.split_documents([full_doc])
     
     # 청크 분할 결과 로컬 저장
-    chunks_save_path = os.path.join(PROCESSED_DOCS_DIR, f"{title}_chunks.md")
+    chunks_save_path = os.path.join(CHUNKS_DIR, f"{title}_chunks.md")
     chunk_separator = "\n\n---\n\n"
     
     if final_splits:
