@@ -14,16 +14,10 @@ CURRENT_FILE_PATH = os.path.abspath(__file__)
 UTIL_DIR = os.path.dirname(CURRENT_FILE_PATH)
 PROJECT_ROOT = os.path.dirname(UTIL_DIR)
 DOCS_DIR = os.path.join(PROJECT_ROOT, "data", "tourism_docs")
-
-# 로컬 저장 경로 정의
 PROCESSED_MD_DIR = os.path.join(PROJECT_ROOT, "data", "processed_md_originals")
 CHUNKS_DIR = os.path.join(PROJECT_ROOT, "data", "processed_chunks_results")
 os.makedirs(PROCESSED_MD_DIR, exist_ok=True)
 os.makedirs(CHUNKS_DIR, exist_ok=True)
-
-print(f"📄 원본 문서 경로: {DOCS_DIR}")
-print(f"📝 Markdown 원본 저장 경로: {PROCESSED_MD_DIR}")
-print(f"✂️ 청크 결과 저장 경로: {CHUNKS_DIR}")
 
 def get_processed_files(collection_name):
     sql = text(f"""
@@ -88,7 +82,7 @@ parser = LlamaParse(
     output_tables_as_HTML=True,
     precise_bounding_box=True,
     result_type="markdown", # LlamaParse 결과 유형
-    num_workers=4,
+    num_workers=8,
     verbose=True,
     language="ko"
 )

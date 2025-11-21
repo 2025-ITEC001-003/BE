@@ -1,6 +1,8 @@
 import httpx
+import os
 from langchain.tools import tool
 from langchain_community.agent_toolkits import create_sql_agent
+from langchain_core.prompts import load_prompt
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
@@ -152,20 +154,12 @@ def jeju_safety_statistics_db(query: str) -> str:
         print(f"[Tool] SQL Agent 오류: {str(e)}")
         return f"SQL 데이터베이스 조회 중 오류 발생: {str(e)}"
 
-
 # --- 4. 관광정보 RAG 도구 (Tool 4) ---
 # 4-1 RAG 체인
-rag_prompt_template = """
-당신은 제주 관광 전문가입니다. 오직 다음 '컨텍스트' 정보만을 기반으로 사용자의 질문에 답변해야 합니다.
-컨텍스트에 답변이 없다면 "죄송합니다, 요청하신 정보는 찾을 수 없습니다."라고 답변하세요.
-
-[컨텍스트]
-{context}
-
-[질문]
-{question}
-"""
-prompt_rag = ChatPromptTemplate.from_template(rag_prompt_template)
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
+PROMPT_FILE = os.path.join(PROJECT_ROOT, "prompts", "jeju_tourism_rag_prompt.yaml")
+prompt_rag = load_prompt(PROMPT_FILE)
 
 # 앙상블 리트리버 + 문서 압축기 리트리버
 compression_retriever = get_compression_retriever()
