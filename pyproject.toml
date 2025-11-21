@@ -29,6 +29,11 @@ pyjwt = "^2.10.1"
 kiwipiepy = "^0.22.0"
 requests = "^2.32.5"
 nltk = "^3.9.2"
+ragas = "0.1.19"
+datasets = "^4.4.1"
+pyyaml = "^6.0.3"
+deepl = "^1.25.0"
+rapidfuzz = "^3.14.3"
 
 
 [build-system]
