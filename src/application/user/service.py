@@ -9,6 +9,7 @@ class UserService:
     def update_user_info(self, user_id: int, user_info: UserInfoUpdateRequest) -> User:
         db_user = self.db.query(User).filter(User.id == user_id).first()
         if db_user:
+            db_user.nickname = user_info.nickname
             db_user.birth_year = user_info.birth_year
             db_user.gender = user_info.gender
             db_user.disease_info = user_info.disease_info
