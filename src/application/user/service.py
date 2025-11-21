@@ -12,6 +12,8 @@ class UserService:
             db_user.birth_year = user_info.birth_year
             db_user.gender = user_info.gender
             db_user.disease_info = user_info.disease_info
+            db_user.email = user_info.email
+            db_user.phone = user_info.phone
             self.db.commit()
             self.db.refresh(db_user)
         return db_user
