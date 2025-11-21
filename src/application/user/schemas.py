@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 class UserInfoUpdateRequest(BaseModel):
+    nickname: Optional[str] = Field(None, description="사용자 닉네임")
     birth_year: str = Field(..., description="출생년도")
     gender: str = Field(..., description="성별")
     disease_info: Optional[str] = Field(None, description="기저질환 정보")
