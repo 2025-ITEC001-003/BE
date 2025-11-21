@@ -34,6 +34,7 @@ datasets = "^4.4.1"
 pyyaml = "^6.0.3"
 deepl = "^1.25.0"
 rapidfuzz = "^3.14.3"
+alembic = "^1.17.2"
 
 
 [build-system]
