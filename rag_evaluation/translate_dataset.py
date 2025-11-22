@@ -7,7 +7,7 @@ load_dotenv()
 
 DEEPL_API_KEY = os.getenv("DEEPL_API_KEY")
 RAG_EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
-INPUT_FILE = os.path.join(RAG_EVAL_DIR, "dataset", "english_testset.csv")
+INPUT_FILE = os.path.join(RAG_EVAL_DIR, "dataset", "english_testset_filtered.csv")
 OUTPUT_FILE = os.path.join(RAG_EVAL_DIR, "dataset", "korean_testset.csv")
 
 def translate_dataset():

@@ -4,12 +4,12 @@ from dotenv import load_dotenv
 from ragas.metrics import faithfulness, answer_relevancy, context_recall, context_precision
 from ragas import evaluate
 from datasets import Dataset
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import load_prompt
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.documents import Document
-from src.core import llm_default, get_compression_retriever
-
+from src.core import get_compression_retriever, get_cached_embedder
+from ragas.run_config import RunConfig
 
 load_dotenv()
 
@@ -17,11 +17,11 @@ RAG_EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(RAG_EVAL_DIR)
 DATASET_FILE = os.path.join(RAG_EVAL_DIR, "dataset", "korean_testset.csv")
 LANGSMITH_PROJECT = "Jeju_RAG_Evaluation_v1" 
-EVAL_RESULT_PATH = os.path.join(RAG_EVAL_DIR, "dataset", "ragas_results.csv")
+EVAL_RESULT_PATH = os.path.join(RAG_EVAL_DIR, "dataset", "korean_ragas_results.csv")
 PROMPT_FILE = os.path.join(PROJECT_ROOT, "prompts", "jeju_tourism_rag_prompt.yaml")
 
-eval_llm = ChatOpenAI(model="gpt-4o-mini") 
-eval_embeddings = OpenAIEmbeddings()
+eval_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+eval_embeddings = get_cached_embedder()
 
 RAGAS_METRICS = [
     faithfulness, 
@@ -58,7 +58,7 @@ def get_ragas_evaluation_output(query: str) -> dict:
         
         generation_chain = (
             prompt_rag
-            | llm_default 
+            | eval_llm
             | StrOutputParser()
         )
         answer = generation_chain.invoke({
@@ -93,17 +93,14 @@ def run_evaluation():
     for i, q in enumerate(questions):
         print(f"   > 질문 {i+1}/{len(questions)} 처리 중: {q[:30]}...")
         
-        # jeju_tourism_rag_search Tool 호출 (반환 형식: {"answer": str, "contexts": list[Document]})
-        # 주의: 이 호출은 동기 함수이므로 시간이 오래 걸릴 수 있습니다.
         tool_output = get_ragas_evaluation_output(q)
         
         # RAGAS Dataset 형식에 맞게 데이터 준비
         results.append({
             "question": q,
             "answer": tool_output.get("answer", "답변 생성 실패"),
-            # contexts의 각 Document 객체에서 .page_content만 추출하여 문자열 리스트로 변환
             "contexts": [doc.page_content for doc in tool_output["contexts"]],
-            "reference": ground_truths[i] # ground_truths는 list[str] 형식이어야 합니다.
+            "ground_truth": ground_truths[i]  # 필드명 변경: reference → ground_truth
         })
 
     # 3. RAGAS 평가
@@ -111,11 +108,18 @@ def run_evaluation():
     
     print("3. RAGAS 평가 실행 중...")
 
+    run_config = RunConfig(
+        max_workers=2,      # 동시 처리 개수를 2개로 제한 (기본값은 훨씬 높음)
+        timeout=240,        # 타임아웃을 240초로 연장
+        max_retries=3,      # 실패 시 재시도 횟수 설정
+    )
+
     result = evaluate(
         ragas_dataset,
         metrics=RAGAS_METRICS,
         llm=eval_llm,
-        embeddings=eval_embeddings
+        embeddings=eval_embeddings,
+        run_config=run_config
     )
 
     # 4. 평가 결과 출력
@@ -134,6 +138,5 @@ if __name__ == "__main__":
     if not os.getenv("LANGCHAIN_API_KEY"):
         print("❌ LangSmith 사용을 위해 LANGCHAIN_API_KEY 환경 변수를 설정해야 합니다.")
     else:
-        os.environ["LANGCHAIN_TRACING_V2"] = "true"
-        os.environ["LANGCHAIN_PROJECT"] = LANGSMITH_PROJECT
+        os.environ["LANGCHAIN_TRACING_V2"] = "false"
         run_evaluation()

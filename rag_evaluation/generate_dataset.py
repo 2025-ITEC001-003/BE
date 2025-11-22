@@ -8,8 +8,14 @@ from src.core import get_cached_embedder, load_documents_from_vectorstore
 
 load_dotenv()
 
-generator_llm = ChatOpenAI(model="gpt-4o-mini")
-critic_llm = ChatOpenAI(model="gpt-4o-mini")
+generator_llm = ChatOpenAI(
+    model="gpt-4.1-mini",
+    temperature=0
+) 
+critic_llm = ChatOpenAI(
+    model="gpt-4.1-mini",
+    temperature=0
+)
 ragas_embeddings = LangchainEmbeddingsWrapper(get_cached_embedder())
 
 CURRENT_FILE_PATH = os.path.abspath(__file__)
@@ -23,31 +29,32 @@ def generate_testset():
     documents = load_documents_from_vectorstore()
     
     if not documents:
+        print("❌ 문서 로드 실패")
         return
 
-    # 2. TestsetGenerator 초기화
+    print(f"2. TestsetGenerator 초기화 중...")
     generator = TestsetGenerator.from_langchain(
         generator_llm,
         critic_llm,
         ragas_embeddings
     )
 
-    # 3. 질문유형 분포 정의
+    # 질문유형 분포 정의
     distributions = {
-        simple: 0.7,
-        reasoning: 0.1,
-        multi_context: 0.1,
-        conditional: 0.1
+        simple: 0.4,
+        reasoning: 0.2,
+        multi_context: 0.2,
+        conditional: 0.2
     }
 
-    print(f"2. RAGAS 합성 데이터셋 생성 시작 (총 {TEST_SIZE}개 질문)...")
+    print(f"3. RAGAS 합성 데이터셋 생성 시작 (총 {TEST_SIZE}개 질문)...")
     testset = generator.generate_with_langchain_docs(
         documents,
         test_size=TEST_SIZE,
         distributions=distributions
     )
 
-    # 4. CSV로 저장
+    # CSV로 저장
     df = testset.to_pandas()
     os.makedirs(os.path.dirname(OUTPUT_FILE_PATH), exist_ok=True)
     df.to_csv(OUTPUT_FILE_PATH, index=False)
