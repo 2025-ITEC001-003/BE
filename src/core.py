@@ -164,7 +164,7 @@ def get_bm25_retriever():
     # BM25 리트리버 생성
     if not splits_from_db:
         print("❌ BM25 Error: DB에 문서가 없어 'splits'가 비어있습니다.")
-        _bm25_retriever_instance = BM25Retriever.from_documents([], k=3)
+        _bm25_retriever_instance = BM25Retriever.from_documents([], k=2)
     else:
         _bm25_retriever_instance = BM25Retriever.from_documents(
             splits_from_db, 
@@ -188,7 +188,7 @@ def get_compression_retriever():
     print("Initializing Compression Retriever (Ensemble + Filters)...")
     
     # 1. 의미, 키워드 리트리버 가져오기
-    vector_retriever = get_vector_store().as_retriever(search_kwargs={"k": 3})
+    vector_retriever = get_vector_store().as_retriever(search_kwargs={"k": 1})
     bm25_retriever = get_bm25_retriever()
     
     # 2. 앙상블 리트리버 생성
