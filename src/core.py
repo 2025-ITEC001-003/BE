@@ -112,19 +112,13 @@ def get_korean_bm25_tokenizer():
     print(f"✅ BM25 Tokenizer 초기화 완료. 불용어 {len(korean_stopwords)}개 적용됨.")
     return _korean_bm25_tokenizer
 
-def get_bm25_retriever():
+def load_documents_from_vectorstore():
     """
-    BM25Retriever 싱글톤 객체를 반환합니다.
-    최초 호출 시 DB(PGVector)에 저장된 원본 텍스트를 로드하여
-    인-메모리 키워드 인덱스를 생성합니다.
+    벡터스토어(DB)에서 문서를 로드합니다.
+    BM25 리트리버 초기화 및 RAGAS 평가용 문서 생성에 사용됩니다.
     """
-    global _bm25_retriever_instance
-    if _bm25_retriever_instance is not None:
-        return _bm25_retriever_instance
-
-    print("Initializing BM25Retriever (from PGVector's stored documents)...")
+    print("벡터스토어에서 문서 로드 중...")
     
-    # 1. PDF 로드 로직을 DB 쿼리 로직으로 대체
     sql_query = f"""
         SELECT document, cmetadata 
         FROM langchain_pg_embedding
@@ -133,24 +127,41 @@ def get_bm25_retriever():
         );
     """
     
-    splits_from_db = []
+    documents = []
     try:
-        # 1-2. SQLAlchemy engine을 사용하여 DB에서 직접 로드
         with engine.connect() as connection:
             results = connection.execute(text(sql_query))
             for row in results:
-                # 1-3. (text, metadata)를 LangChain 'Document' 객체로 변환
-                splits_from_db.append(Document(page_content=row[0], metadata=row[1]))
+                documents.append(Document(page_content=row[0], metadata=row[1]))
         
-        print(f"BM25: Found and loaded {len(splits_from_db)} chunks from DB.")
-
+        print(f"✅ 벡터스토어에서 {len(documents)}개 문서 로드 완료")
+        
+        if not documents:
+            print("❌ 로드된 문서가 없습니다. 벡터스토어를 확인하세요.")
+            return []
+        
+        return documents
+        
     except Exception as e:
-        print(f"❌ BM25 Error: DB에서 청크를 로드하는 데 실패했습니다: {e}")
-        print("BM25 리트리버를 비활성화합니다.")
-        _bm25_retriever_instance = BM25Retriever.from_documents([], k=3)
+        print(f"❌ 벡터스토어 로드 실패: {e}")
+        return []
+
+def get_bm25_retriever():
+    """
+    BM25Retriever 싱글톤 객체를 반환합니다.
+    최초 호출 시 load_documents_from_vectorstore()를 사용하여
+    DB(PGVector)에 저장된 원본 텍스트를 로드합니다.
+    """
+    global _bm25_retriever_instance
+    if _bm25_retriever_instance is not None:
         return _bm25_retriever_instance
 
-    # 2. DB에서 가져온 'splits_from_db' 리스트로 인덱스 생성
+    print("Initializing BM25Retriever (from PGVector's stored documents)...")
+    
+    # DB에서 문서 로드
+    splits_from_db = load_documents_from_vectorstore()
+
+    # BM25 리트리버 생성
     if not splits_from_db:
         print("❌ BM25 Error: DB에 문서가 없어 'splits'가 비어있습니다.")
         _bm25_retriever_instance = BM25Retriever.from_documents([], k=3)
