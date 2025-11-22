@@ -28,8 +28,16 @@ def translate_dataset():
     for col in cols_to_translate:
         print(f"2. '{col}' 컬럼 번역 중...")
         texts = df[col].tolist()
-        # 번역 속도를 위해, 실제 사용 시에는 Deepl의 대량 번역 API를 활용하거나 리스트 전체를 한 번에 전송하도록 최적화할 수 있습니다.
-        translated_texts = [translator(text) for text in texts]
+        translated_texts = []
+        
+        for i, text in enumerate(texts):
+            try:
+                translated_text = translator(text)
+                translated_texts.append(translated_text)
+            except Exception as e:
+                print(f"   ⚠️  {i+1}번째 텍스트 번역 실패: {e}. 원문 사용.")
+                translated_texts.append(text)  # 실패 시 원문 유지
+        
         df[col] = translated_texts
 
     # 3. CSV로 저장
