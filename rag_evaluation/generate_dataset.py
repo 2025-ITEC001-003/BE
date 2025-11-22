@@ -41,10 +41,10 @@ def generate_testset():
 
     # 질문유형 분포 정의
     distributions = {
-        simple: 0.4,
-        reasoning: 0.2,
-        multi_context: 0.2,
-        conditional: 0.2
+        simple: 0.7,
+        reasoning: 0.1,
+        multi_context: 0.1,
+        conditional: 0.1
     }
 
     print(f"3. RAGAS 합성 데이터셋 생성 시작 (총 {TEST_SIZE}개 질문)...")
