@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 
 # 절대 경로 기반 설정
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -13,17 +14,16 @@ from dotenv import load_dotenv
 from langchain.smith import RunEvalConfig, run_on_dataset
 from langsmith import Client
 from langchain_core.prompts import load_prompt
-from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
 
-from src.core import get_compression_retriever, llm_default
+from src.core import get_compression_retriever, llm_rag
 
 load_dotenv()
 
 # 1. 설정 및 리소스 로드
 # 평가할 데이터셋 이름 (upload_dataset.py에서 지정한 이름과 동일해야 함)
-DATASET_NAME = "Jeju_Tourism_QA_Set_KO"
+DATASET_NAME = "Jeju_Tourism_QA_Set_K1"
 
 PROMPT_FILE = os.path.join(project_root, "prompts", "jeju_tourism_rag_prompt.yaml")
 try:
@@ -56,7 +56,7 @@ def evaluation_target_chain(inputs):
     # 2. 답변 생성 (Generation)
     chain = (
         rag_prompt 
-        | llm_default 
+        | llm_rag
         | StrOutputParser()
     )
     
@@ -76,9 +76,9 @@ def evaluation_target_chain(inputs):
 def run_evaluation():
     client = Client()
     
-    # 평가자(Judge) 모델 설정 - 정확한 평가를 위해 gpt-4o 권장
+    # 평가자(Judge) 모델 설정 - 정확한 평가를 위해 gpt-4.1 권장
     eval_llm = ChatOpenAI(
-        model="gpt-4o", 
+        model="gpt-4.1-mini", 
         temperature=0
     )
 
@@ -111,7 +111,7 @@ def run_evaluation():
             dataset_name=DATASET_NAME,
             llm_or_chain_factory=evaluation_target_chain,
             evaluation=eval_config,
-            project_name="jeju-rag-eval-experiment-v1", # 실험 프로젝트 이름 (버전 관리용)
+            project_name= f"jeju-rag-eval-{time.strftime('%Y%m%d-%H%M%S')}", # 실험 프로젝트 이름 (버전 관리용)
         )
         print("✅ 평가 완료! LangSmith 대시보드에서 결과를 확인하세요.")
         print(f"🔗 프로젝트 링크: {results['project_url'] if 'project_url' in results else 'N/A'}")

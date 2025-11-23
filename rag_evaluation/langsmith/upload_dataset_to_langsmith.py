@@ -1,4 +1,5 @@
 import os
+import time
 import pandas as pd
 from langsmith import Client
 from dotenv import load_dotenv
@@ -6,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 1. 설정
-DATASET_NAME = "Jeju_Tourism_QA_Set_KO"  # LangSmith에 저장될 데이터셋 이름
+DATASET_NAME = f"Jeju_Tourism_QA_Set_-{time.strftime('%Y%m%d-%H%M%S')}"  # LangSmith에 저장될 데이터셋 이름
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 RAG_EVAL_DIR = os.path.dirname(CURRENT_DIR)
 CSV_PATH = os.path.join(RAG_EVAL_DIR, "dataset", "korean_testset.csv")
