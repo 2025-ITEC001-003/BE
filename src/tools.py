@@ -249,10 +249,19 @@ def jeju_tourism_rag_search(query: str) -> str:
             | llm_rag
             | StrOutputParser()
         )
-        return generation_chain.invoke({
+        local_answer = generation_chain.invoke({
             "context": format_docs(docs),
             "question": query
         })
+
+        # 사용중인 RAG 프롬프트에서는 컨텍스트에 답이 없을 경우
+        not_found_phrase = "죄송합니다, 요청하신 정보는 찾을 수 없습니다."
+        # 응답에 추가 공백이나 문장부호 여지가 있으므로 포함 여부로 판단
+        if local_answer and not_found_phrase in local_answer:
+            print("[RAG] 1-3. 주어진 컨텍스트로 답변할 수 없음. 웹 검색으로 대체.")
+            raise ValueError("RAG answer indicates no information found.")
+
+        return local_answer
 
     except Exception as e:
         # 4. (RAG 실패 / Fallback) 웹 검색 실행
