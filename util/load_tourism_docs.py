@@ -3,6 +3,7 @@ import glob
 from sqlalchemy import text
 from llama_parse import LlamaParse
 from llama_index.core import SimpleDirectoryReader
+from typing import cast, Dict, Any
 from langchain_core.documents import Document
 from langchain_postgres.vectorstores import PGVector
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -72,35 +73,14 @@ if not files_to_process:
 # 2. LlamaParse 및 Reader 초기화
 print(f"\n🚀 {len(files_to_process)}개 파일 처리를 시작합니다...")
 
-parser = LlamaParse(
-    api_key=os.getenv("LLAMA_CLOUD_API_KEY"),
-    parse_mode="parse_page_with_agent",
-    model="openai-gpt-4-1-mini",
-    high_res_ocr=True,
-    adaptive_long_table=True,
-    outlined_table_extraction=True,
-    output_tables_as_HTML=True,
-    precise_bounding_box=True,
-    result_type="markdown", # LlamaParse 결과 유형
-    num_workers=8,
-    verbose=True,
-    language="ko"
-)
-
-file_extractor = {".pdf": parser}
-reader = SimpleDirectoryReader(
-    input_files=files_to_process,
-    file_extractor=file_extractor
-)
-
-# 3. Recursive 분할기
+# 텍스트 분할기
 text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=1000,
     chunk_overlap=200,
     separators=["\n\n", "\n", " ", ""]
 )
 
-# 4. 벡터 스토어 연결
+# 벡터 스토어 연결
 vector_store = PGVector(
     collection_name=COLLECTION_NAME,
     connection=DATABASE_URL,
@@ -108,52 +88,98 @@ vector_store = PGVector(
     pre_delete_collection=False
 )
 
-# 5. 파일 단위 처리 (병합 -> Recursive 분할 -> 저장 및 로컬 저장)
-for i, docs_in_file in enumerate(reader.iter_data()):
-    if not docs_in_file:
-        continue
+# LlamaParse는 실제로 필요할 때만 초기화(처음 파싱이 필요한 파일 만)
+parser = None
+file_extractor = None
 
-    first_doc_meta = docs_in_file[0].metadata
-    file_path = first_doc_meta.get("file_path", "")
-    raw_filename = first_doc_meta.get("file_name", "unknown")
-    title = raw_filename.replace(".pdf", "")
-    
-    print(f"\n--- Processing file: {raw_filename} ({len(docs_in_file)} pages) ---")
+# 파일 단위 처리: 이미 처리된 Markdown이 있으면 그것을 사용하고, 없으면 LlamaParse로 PDF 파싱
+for pdf_path in files_to_process:
+    raw_filename = os.path.basename(pdf_path)
+    title = raw_filename.replace('.pdf', '')
+    print(f"\n--- Processing file: {raw_filename} ---")
 
     # 기존 데이터 삭제
-    delete_existing_file_data(file_path, COLLECTION_NAME)
+    delete_existing_file_data(pdf_path, COLLECTION_NAME)
 
-    # 텍스트 병합 (LlamaParse의 Markdown 결과)
-    full_text = "\n\n".join([doc.text for doc in docs_in_file])
-
-    # LlamaParse Markdown 전체 결과 로컬 저장
+    # 먼저 이미 로컬에 저장된 Markdown이 있는지 확인
     md_save_path = os.path.join(PROCESSED_MD_DIR, f"{title}.md")
-    try:
-        with open(md_save_path, "w", encoding="utf-8") as f:
-            f.write(full_text)
-        print(f"  📝 Markdown 원본 저장 완료: {md_save_path}")
-    except Exception as e:
-        print(f"  ❌ Markdown 원본 저장 실패: {e}")
+    full_text = None
 
+    if os.path.exists(md_save_path):
+        try:
+            with open(md_save_path, 'r', encoding='utf-8') as f:
+                full_text = f.read()
+            print(f"  📄 기존 Markdown 사용: {md_save_path}")
+        except Exception as e:
+            print(f"  ❌ 기존 Markdown 읽기 실패, 파싱으로 대체: {e}")
+
+    # Markdown이 없으면 LlamaParse로 PDF 파싱
+    if not full_text:
+        # lazy init parser
+        if parser is None:
+            parser = LlamaParse(
+                api_key=os.getenv("LLAMA_CLOUD_API_KEY", ""),
+                parse_mode="parse_page_with_agent",
+                model="openai-gpt-4-1-mini",
+                high_res_ocr=True,
+                adaptive_long_table=True,
+                outlined_table_extraction=True,
+                output_tables_as_HTML=True,
+                precise_bounding_box=True,
+                # omit explicit result_type to match expected enum/signature
+                num_workers=8,
+                verbose=True,
+                language="ko"
+            )
+            file_extractor = cast(Dict[str, Any], {".pdf": parser})
+
+        print(f"  🔎 LlamaParse로 PDF 파싱 시작: {raw_filename}")
+        reader = SimpleDirectoryReader(input_files=[pdf_path], file_extractor=file_extractor)
+        try:
+            docs_iter = reader.iter_data()
+            docs_in_file = next(docs_iter, [])
+        except Exception as e:
+            print(f"  ❌ LlamaParse 파싱 실패: {e}")
+            docs_in_file = []
+
+        if not docs_in_file:
+            print("  ⚠️ 추출된 페이지가 없습니다. 해당 파일 건너뜀.")
+            continue
+
+        # LlamaParse로부터 반환된 각 페이지의 텍스트를 병합
+        parts = []
+        for doc in docs_in_file:
+            # support different doc types (llama vs langchain)
+            text_part = getattr(doc, 'text', None) or getattr(doc, 'page_content', '')
+            parts.append(text_part)
+        full_text = "\n\n".join(parts)
+
+        # Markdown 원본을 로컬에 저장
+        try:
+            with open(md_save_path, 'w', encoding='utf-8') as f:
+                f.write(full_text)
+            print(f"  📝 Markdown 원본 저장 완료: {md_save_path}")
+        except Exception as e:
+            print(f"  ❌ Markdown 원본 저장 실패: {e}")
 
     # 메타데이터 구성 및 LangChain Document 생성
     file_metadata = {
-        "source": file_path,
+        "source": pdf_path,
         "title": title,
     }
-    
+
     full_doc = Document(
-        page_content=full_text,
+        page_content=full_text or "",
         metadata=file_metadata
     )
-    
+
     # 청크 분할
     final_splits = text_splitter.split_documents([full_doc])
-    
+
     # 청크 분할 결과 로컬 저장
     chunks_save_path = os.path.join(CHUNKS_DIR, f"{title}_chunks.md")
     chunk_separator = "\n\n---\n\n"
-    
+
     if final_splits:
         try:
             with open(chunks_save_path, "w", encoding="utf-8") as f:
@@ -165,7 +191,7 @@ for i, docs_in_file in enumerate(reader.iter_data()):
             print(f"  ✂️ 청크 결과 저장 완료: {chunks_save_path} ({len(final_splits)} chunks)")
         except Exception as e:
             print(f"  ❌ 청크 결과 저장 실패: {e}")
-            
+
         # DB 저장
         vector_store.add_documents(final_splits)
         print(f"  ✅ DB 저장 완료 ({len(final_splits)} chunks) - Title: {title}")
