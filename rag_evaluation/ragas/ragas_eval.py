@@ -135,9 +135,6 @@ def run_evaluation():
     print(f"✅ RAGAS 평가 결과 CSV 저장 완료: {EVAL_RESULT_PATH}")
 
 if __name__ == "__main__":
-    # LangSmith 환경변수 설정 확인 및 적용
-    if not os.getenv("LANGCHAIN_API_KEY"):
-        print("❌ LangSmith 사용을 위해 LANGCHAIN_API_KEY 환경 변수를 설정해야 합니다.")
-    else:
-        os.environ["LANGCHAIN_TRACING_V2"] = "false"
-        run_evaluation()
+    # LangSmith tracing 비활성화
+    os.environ["LANGCHAIN_TRACING_V2"] = "false"
+    run_evaluation()

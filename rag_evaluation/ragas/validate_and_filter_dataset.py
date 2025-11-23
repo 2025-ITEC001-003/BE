@@ -45,14 +45,14 @@ def validate_and_filter_dataset():
     print(f"✅ 답변 있는 케이스: {len(df) - no_answer_count}개 ({100 - no_answer_pct:.1f}%)")
     
     # 진화 타입 분포
-    print(f"\n📈 진화 타입별 분포:")
+    print(f"\n📈 질문 유형별 분포:")
     evolution_dist = df['evolution_type'].value_counts()
     for evo_type, count in evolution_dist.items():
         pct = (count / len(df)) * 100
         print(f"  • {evo_type}: {count}개 ({pct:.1f}%)")
     
     # 답변 없는 케이스의 진화 타입 분포
-    print(f"\n📉 답변 없는 케이스의 진화 타입 분포:")
+    print(f"\n📉 답변 없는 케이스의 질문 유형 분포:")
     no_answer_evolution = df[no_answer_mask]['evolution_type'].value_counts()
     for evo_type, count in no_answer_evolution.items():
         pct = (count / no_answer_count) * 100
@@ -67,7 +67,7 @@ def validate_and_filter_dataset():
     print(f"  남은 케이스: {len(df_filtered)}개")
     
     # 필터링된 데이터의 진화 타입 분포
-    print(f"\n📊 필터링된 데이터셋의 진화 타입 분포:")
+    print(f"\n📊 필터링된 데이터셋의 질문 유형 분포:")
     filtered_evolution = df_filtered['evolution_type'].value_counts()
     for evo_type, count in filtered_evolution.items():
         pct = (count / len(df_filtered)) * 100
