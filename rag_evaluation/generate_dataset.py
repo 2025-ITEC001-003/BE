@@ -9,12 +9,14 @@ from src.core import get_cached_embedder, load_documents_from_vectorstore
 load_dotenv()
 
 generator_llm = ChatOpenAI(
-    model="gpt-4.1-mini",
-    temperature=0
+    model="gpt-4o-mini",
+    temperature=0,
+    max_retries=5
 ) 
 critic_llm = ChatOpenAI(
-    model="gpt-4.1-mini",
-    temperature=0
+    model="gpt-4.1",
+    temperature=0,
+    max_retries=10
 )
 ragas_embeddings = LangchainEmbeddingsWrapper(get_cached_embedder())
 
@@ -51,13 +53,14 @@ def generate_testset():
     testset = generator.generate_with_langchain_docs(
         documents,
         test_size=TEST_SIZE,
-        distributions=distributions
+        distributions=distributions,
+        with_debugging_logs=True
     )
 
     # CSV로 저장
     df = testset.to_pandas()
     os.makedirs(os.path.dirname(OUTPUT_FILE_PATH), exist_ok=True)
-    df.to_csv(OUTPUT_FILE_PATH, index=False)
+    df.to_csv(OUTPUT_FILE_PATH, index=False, encoding='utf-8-sig') 
     print(f"✅ 데이터셋 생성 완료: {OUTPUT_FILE_PATH} (총 {len(df)}개)")
 
 if __name__ == "__main__":
