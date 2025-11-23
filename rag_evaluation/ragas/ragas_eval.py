@@ -13,11 +13,12 @@ from ragas.run_config import RunConfig
 
 load_dotenv()
 
-RAG_EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+RAG_EVAL_DIR = os.path.dirname(CURRENT_DIR)
 PROJECT_ROOT = os.path.dirname(RAG_EVAL_DIR)
 DATASET_FILE = os.path.join(RAG_EVAL_DIR, "dataset", "korean_testset.csv")
 LANGSMITH_PROJECT = "Jeju_RAG_Evaluation_v1" 
-EVAL_RESULT_PATH = os.path.join(RAG_EVAL_DIR, "dataset", "korean_ragas_results.csv")
+EVAL_RESULT_PATH = os.path.join(RAG_EVAL_DIR, "result", "korean_ragas_results.csv")
 PROMPT_FILE = os.path.join(PROJECT_ROOT, "prompts", "jeju_tourism_rag_prompt.yaml")
 
 eval_llm = ChatOpenAI(model="gpt-4.1", temperature=0)

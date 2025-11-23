@@ -4,7 +4,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-RAG_EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+RAG_EVAL_DIR = os.path.dirname(CURRENT_DIR)
 INPUT_FILE = os.path.join(RAG_EVAL_DIR, "dataset", "english_testset.csv")
 OUTPUT_FILE_FILTERED = os.path.join(RAG_EVAL_DIR, "dataset", "english_testset_filtered.csv")
 

@@ -20,9 +20,8 @@ critic_llm = ChatOpenAI(
 )
 ragas_embeddings = LangchainEmbeddingsWrapper(get_cached_embedder())
 
-CURRENT_FILE_PATH = os.path.abspath(__file__)
-RAG_EVAL_DIR = os.path.dirname(CURRENT_FILE_PATH)
-PROJECT_ROOT = os.path.dirname(RAG_EVAL_DIR)
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+RAG_EVAL_DIR = os.path.dirname(CURRENT_DIR)
 OUTPUT_FILE_PATH = os.path.join(RAG_EVAL_DIR, "dataset", "english_testset.csv")
 TEST_SIZE = 30 
 

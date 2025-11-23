@@ -7,7 +7,9 @@ load_dotenv()
 
 # 1. 설정
 DATASET_NAME = "Jeju_Tourism_QA_Set_KO"  # LangSmith에 저장될 데이터셋 이름
-CSV_PATH = "./rag_evaluation/dataset/korean_testset.csv" # 생성한 csv 경로 확인
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+RAG_EVAL_DIR = os.path.dirname(CURRENT_DIR)
+CSV_PATH = os.path.join(RAG_EVAL_DIR, "dataset", "korean_testset.csv")
 
 def upload_dataset():
     client = Client()

@@ -1,12 +1,13 @@
 import pandas as pd
 import os
 from dotenv import load_dotenv
-from rag_evaluation.translator import Translator 
+from .translator import Translator 
 
 load_dotenv()
 
 DEEPL_API_KEY = os.getenv("DEEPL_API_KEY")
-RAG_EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+RAG_EVAL_DIR = os.path.dirname(CURRENT_DIR)
 INPUT_FILE = os.path.join(RAG_EVAL_DIR, "dataset", "english_testset_filtered.csv") # 파일명 확인 필요
 OUTPUT_FILE = os.path.join(RAG_EVAL_DIR, "dataset", "korean_testset.csv")
 

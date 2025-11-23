@@ -1,9 +1,13 @@
 import os
 import sys
 
+# 절대 경로 기반 설정
 current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(current_dir)
-sys.path.append(project_root)
+rag_eval_dir = os.path.dirname(current_dir)
+project_root = os.path.dirname(rag_eval_dir)
+
+# src 모듈 로드를 위해 project_root를 Python path에 추가
+sys.path.insert(0, project_root)
 
 from dotenv import load_dotenv
 from langchain.smith import RunEvalConfig, run_on_dataset
