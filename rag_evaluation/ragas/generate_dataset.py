@@ -8,15 +8,26 @@ from src.core import get_cached_embedder, load_documents_from_vectorstore
 
 load_dotenv()
 
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+
+# 1. Generator: 데이터 생성용 (DeepSeek V3 사용)
 generator_llm = ChatOpenAI(
-    model="gpt-4.1-mini",
+    model="deepseek-chat",
+    api_key=DEEPSEEK_API_KEY,
+    base_url="https://api.deepseek.com",
     temperature=0,
-    max_retries=5
-) 
+    max_retries=10,
+    timeout=120
+)
+
+# 수정된 Critic 설정
 critic_llm = ChatOpenAI(
-    model="gpt-4.1",
+    model="deepseek-chat",
+    api_key=DEEPSEEK_API_KEY,
+    base_url="https://api.deepseek.com",
     temperature=0,
-    max_retries=10
+    max_retries=10,
+    timeout=120
 )
 ragas_embeddings = LangchainEmbeddingsWrapper(get_cached_embedder())
 
@@ -52,7 +63,7 @@ def generate_testset():
     testset = generator.generate_with_langchain_docs(
         documents,
         test_size=TEST_SIZE,
-        distributions=distributions
+        distributions=distributions,
     )
 
     # CSV로 저장

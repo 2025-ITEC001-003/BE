@@ -21,7 +21,11 @@ LANGSMITH_PROJECT = "Jeju_RAG_Evaluation_v1"
 EVAL_RESULT_PATH = os.path.join(RAG_EVAL_DIR, "result", "korean_ragas_results.csv")
 PROMPT_FILE = os.path.join(PROJECT_ROOT, "prompts", "jeju_tourism_rag_prompt.yaml")
 
-eval_llm = ChatOpenAI(model="gpt-4.1", temperature=0)
+eval_llm = ChatOpenAI(
+    model="gpt-4.1-mini",
+    temperature=0
+)
+
 eval_embeddings = get_cached_embedder()
 
 RAGAS_METRICS = [
@@ -110,7 +114,7 @@ def run_evaluation():
     print("3. RAGAS 평가 실행 중...")
 
     run_config = RunConfig(
-        max_workers=2,      # 동시 처리 개수를 2개로 제한 (기본값은 훨씬 높음)
+        max_workers=4,      # 동시 처리 개수를 4개로 제한 (기본값은 훨씬 높음)
         timeout=240,        # 타임아웃을 240초로 연장
         max_retries=3,      # 실패 시 재시도 횟수 설정
     )
