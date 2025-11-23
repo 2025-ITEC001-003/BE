@@ -21,15 +21,26 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
-# OpenAI API 키를 환경변수에 명시적으로 설정 (LangChain이 사용)
+# OpenAI API 키를 환경변수에 명시적으로 설정
 os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 os.environ["OPENWEATHER_API_KEY"] = OPENWEATHER_API_KEY
+os.environ["DEEPSEEK_API_KEY"] = DEEPSEEK_API_KEY
 
-# llm_default : ConversationSummaryBufferMemory 요약, sql_agent, RAG용 llm (stream option 미포함)
+# llm_default : ConversationSummaryBufferMemory 요약, sql_agent
 llm_default = ChatOpenAI(
     model="gpt-4.1-mini",
     temperature=1,
+    api_key=OPENAI_API_KEY
+)
+
+# RAG용 llm (stream option 미포함)
+llm_rag = ChatOpenAI(
+    model="gpt-4.1",
+    temperature=0,
+    max_retries=10,
+    timeout=120,
     api_key=OPENAI_API_KEY
 )
 
@@ -168,7 +179,7 @@ def get_bm25_retriever():
     else:
         _bm25_retriever_instance = BM25Retriever.from_documents(
             splits_from_db, 
-            k=3,
+            k=2,
             custom_tokenizer=get_korean_bm25_tokenizer()
         )
     
@@ -188,13 +199,13 @@ def get_compression_retriever():
     print("Initializing Compression Retriever (Ensemble + Filters)...")
     
     # 1. 의미, 키워드 리트리버 가져오기
-    vector_retriever = get_vector_store().as_retriever(search_kwargs={"k": 1})
+    vector_retriever = get_vector_store().as_retriever(search_kwargs={"k": 2})
     bm25_retriever = get_bm25_retriever()
     
     # 2. 앙상블 리트리버 생성
     ensemble_retriever = EnsembleRetriever(
         retrievers=[bm25_retriever, vector_retriever],
-        weights=[0.4, 0.6]
+        weights=[0.5, 0.5]
     )
     
     # 3. 압축 필터 생성 (임베더 싱글톤 사용)
@@ -206,7 +217,7 @@ def get_compression_retriever():
     )
     relevance_filter = EmbeddingsFilter(
         embeddings=cached_embedder,
-        similarity_threshold=0.80 #테스트 결과에 따른 임계값 조정
+        similarity_threshold=0.80
     )
 
     reorder_transformer = LongContextReorder()
@@ -224,3 +235,54 @@ def get_compression_retriever():
     
     print("Compression Retriever initialization complete.")
     return _compression_retriever_instance
+
+# --- 디버깅용: 리트리버 각 단계별 결과 확인 함수 ---
+def debug_retriever_pipeline(query: str):
+    """
+    리트리버 파이프라인의 각 단계를 분석하여 디버깅합니다.
+    - Stage 1: BM25 결과
+    - Stage 2: Vector 결과
+    - Stage 3: Ensemble 결과
+    - Stage 4: 필터링 후 최종 결과
+    """
+    print("\n" + "="*60)
+    print(f"🔍 디버깅: 쿼리 = '{query}'")
+    print("="*60)
+    
+    # Stage 1: BM25
+    bm25_ret = get_bm25_retriever()
+    bm25_docs = bm25_ret.invoke(query)
+    print(f"\n[Stage 1] BM25 검색 결과: {len(bm25_docs)}개")
+    for i, doc in enumerate(bm25_docs, 1):
+        content_preview = doc.page_content[:80].replace('\n', ' ')
+        print(f"  {i}. {content_preview}...")
+    
+    # Stage 2: Vector
+    vector_ret = get_vector_store().as_retriever(search_kwargs={"k": 5})
+    vector_docs = vector_ret.invoke(query)
+    print(f"\n[Stage 2] Vector 검색 결과: {len(vector_docs)}개")
+    for i, doc in enumerate(vector_docs, 1):
+        content_preview = doc.page_content[:80].replace('\n', ' ')
+        print(f"  {i}. {content_preview}...")
+    
+    # Stage 3: Ensemble
+    ensemble_ret = EnsembleRetriever(
+        retrievers=[bm25_ret, vector_ret],
+        weights=[0.5, 0.5]
+    )
+    ensemble_docs = ensemble_ret.invoke(query)
+    print(f"\n[Stage 3] Ensemble 통합 결과: {len(ensemble_docs)}개")
+    for i, doc in enumerate(ensemble_docs, 1):
+        content_preview = doc.page_content[:80].replace('\n', ' ')
+        print(f"  {i}. {content_preview}...")
+    
+    # Stage 4: Final (Compression + Filters)
+    compression_ret = get_compression_retriever()
+    final_docs = compression_ret.invoke(query)
+    print(f"\n[Stage 4] 필터링 최종 결과: {len(final_docs)}개")
+    for i, doc in enumerate(final_docs, 1):
+        content_preview = doc.page_content[:100].replace('\n', ' ')
+        print(f"  {i}. {content_preview}...")
+    
+    print("\n" + "="*60)
+    return final_docs

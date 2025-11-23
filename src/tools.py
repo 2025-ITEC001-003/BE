@@ -8,7 +8,7 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from ddgs import DDGS
 
-from src.core import get_db_langchain, OPENWEATHER_API_KEY, llm_default, get_compression_retriever
+from src.core import get_db_langchain, OPENWEATHER_API_KEY, llm_default, llm_rag, get_compression_retriever
 from src.data_loader import get_jeju_coordinates
 
 # --- 1. '오늘/현재' 날씨 도구 (Tool 1 - OWM) ---
@@ -246,7 +246,7 @@ def jeju_tourism_rag_search(query: str) -> str:
         # local_rag_chain을 실행 (이미 리트리버가 실행되었으므로 수동 주입)
         generation_chain = (
             prompt_rag
-            | llm_default
+            | llm_rag
             | StrOutputParser()
         )
         return generation_chain.invoke({
