@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import time
+from datetime import datetime
 from dotenv import load_dotenv
 from ragas.metrics import faithfulness, answer_relevancy, context_recall, context_precision
 from ragas import evaluate
@@ -20,12 +21,13 @@ RAG_EVAL_DIR = os.path.dirname(CURRENT_DIR)
 PROJECT_ROOT = os.path.dirname(RAG_EVAL_DIR)
 DATASET_FILE = os.path.join(RAG_EVAL_DIR, "dataset", "korean_testset.csv")
 LANGSMITH_PROJECT = "Jeju_RAG_Evaluation_v1" 
-EVAL_RESULT_PATH = os.path.join(RAG_EVAL_DIR, "result", "korean_ragas_results.csv")
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+EVAL_RESULT_PATH = os.path.join(RAG_EVAL_DIR, "result", f"korean_ragas_results_{timestamp}.csv")
 PROMPT_FILE = os.path.join(PROJECT_ROOT, "prompts", "jeju_tourism_rag_prompt.yaml")
 
 # Rate Limit 완화 설정
 eval_llm = ChatOpenAI(
-    model="gpt-4.1-mini",  # gpt-4.1-mini
+    model="gpt-5.1",
     temperature=0,
     max_retries=5,  # 재시도 횟수 증가
     timeout=60,
@@ -97,8 +99,8 @@ def run_evaluation():
     df = pd.read_csv(DATASET_FILE)
     print(f"1. 한국어 데이터셋 로드 완료 (총 {len(df)}개 질문)")
     
-    questions = df['question'].tolist()
-    ground_truths = df['ground_truth'].tolist()
+    questions = df['user_input'].tolist()
+    ground_truths = df['reference'].tolist()
     
     print("2. RAG Tool 실행 및 결과 수집 시작...")
     
@@ -120,7 +122,7 @@ def run_evaluation():
         
         # ⭐ Rate Limit 완화: 질문 간 1초 지연
         if i < len(questions) - 1:
-            time.sleep(1)
+            time.sleep(5)
 
     # 3. RAGAS 평가
     ragas_dataset = Dataset.from_list(results)
