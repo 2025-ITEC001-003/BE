@@ -2,19 +2,31 @@ import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from langchain_community.utilities import SQLDatabase
-from langchain_openai import ChatOpenAI
-from langchain.storage import LocalFileStore
-from langchain.embeddings import CacheBackedEmbeddings
-from langchain_openai import OpenAIEmbeddings
-from langchain_postgres import PGVector
-from langchain_core.documents import Document
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+
+# LangChain 1.0+에서는 아래 모듈들이 langchain_classic으로 이동
+from langchain_classic.storage import LocalFileStore
 from langchain_community.retrievers import BM25Retriever
-from langchain.retrievers import ContextualCompressionRetriever, EnsembleRetriever
-from langchain.retrievers.document_compressors.base import DocumentCompressorPipeline
-from langchain.retrievers.document_compressors.embeddings_filter import EmbeddingsFilter
-from langchain_community.document_transformers import EmbeddingsRedundantFilter, LongContextReorder
+from langchain_classic.embeddings import CacheBackedEmbeddings
+from langchain_classic.retrievers import (
+    ContextualCompressionRetriever, 
+    EnsembleRetriever
+)
+from langchain_classic.retrievers.document_compressors import (
+    DocumentCompressorPipeline, 
+    EmbeddingsFilter
+)
+from langchain_community.document_transformers import (
+    EmbeddingsRedundantFilter, 
+    LongContextReorder
+)
+
+# langchain_core와 langchain_postgres는 그대로 유지
+from langchain_core.documents import Document
+from langchain_postgres.vectorstores import PGVector
 from util.stopwords import get_korean_stopwords
 from src.kiwi_tokenizer import KiwiBM25Tokenizer
+from langchain_cohere import CohereRerank
 
 # .env 파일 로드
 load_dotenv()
@@ -22,17 +34,20 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+COHERE_API_KEY = os.getenv("COHERE_API_KEY")
 
 # OpenAI API 키를 환경변수에 명시적으로 설정
-os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
-os.environ["OPENWEATHER_API_KEY"] = OPENWEATHER_API_KEY
-os.environ["DEEPSEEK_API_KEY"] = DEEPSEEK_API_KEY
+if OPENAI_API_KEY:
+    os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
+if OPENWEATHER_API_KEY:
+    os.environ["OPENWEATHER_API_KEY"] = OPENWEATHER_API_KEY
+if DEEPSEEK_API_KEY:
+    os.environ["DEEPSEEK_API_KEY"] = DEEPSEEK_API_KEY
 
 # llm_default : ConversationSummaryBufferMemory 요약, sql_agent
 llm_default = ChatOpenAI(
     model="gpt-4.1-mini",
-    temperature=1,
-    api_key=OPENAI_API_KEY
+    temperature=1
 )
 
 # RAG용 llm (stream option 미포함)
@@ -40,22 +55,20 @@ llm_rag = ChatOpenAI(
     model="gpt-4.1",
     temperature=0,
     max_retries=10,
-    timeout=120,
-    api_key=OPENAI_API_KEY
+    timeout=120
 )
 
 # llm_streaming : 메인 스트리밍 Agent용 (토큰 추적 옵션 포함)
 llm_streaming = ChatOpenAI(
     model="gpt-4.1", 
     temperature=0, 
-    api_key=OPENAI_API_KEY,
     model_kwargs={
         "stream_options": {"include_usage": True}
     }
 )
 
-# # --- PostgreDB 싱글톤 (기존) ---
-engine = create_engine(DATABASE_URL)
+# --- PostgreDB 싱글톤 (기존) ---
+engine = create_engine(DATABASE_URL or "")
 _db_langchain= None
 
 def get_db_langchain():
@@ -175,11 +188,11 @@ def get_bm25_retriever():
     # BM25 리트리버 생성
     if not splits_from_db:
         print("❌ BM25 Error: DB에 문서가 없어 'splits'가 비어있습니다.")
-        _bm25_retriever_instance = BM25Retriever.from_documents([], k=2)
+        _bm25_retriever_instance = BM25Retriever.from_documents([], k=5)
     else:
         _bm25_retriever_instance = BM25Retriever.from_documents(
             splits_from_db, 
-            k=2,
+            k=5,
             custom_tokenizer=get_korean_bm25_tokenizer()
         )
     
@@ -199,7 +212,7 @@ def get_compression_retriever():
     print("Initializing Compression Retriever (Ensemble + Filters)...")
     
     # 1. 의미, 키워드 리트리버 가져오기
-    vector_retriever = get_vector_store().as_retriever(search_kwargs={"k": 2})
+    vector_retriever = get_vector_store().as_retriever(search_kwargs={"k": 5})
     bm25_retriever = get_bm25_retriever()
     
     # 2. 앙상블 리트리버 생성
@@ -221,10 +234,16 @@ def get_compression_retriever():
     )
 
     reorder_transformer = LongContextReorder()
+
+    reranker = CohereRerank(
+        model="rerank-multilingual-v3.0", # 최신 다국어 모델 사용 (한국어 포함)
+        top_n=3
+    )
+
     
     # 4. 압축 파이프라인 생성
     pipeline_compressor = DocumentCompressorPipeline(
-        transformers=[redundant_filter, relevance_filter, reorder_transformer]
+        transformers=[redundant_filter, relevance_filter, reranker, reorder_transformer]
     )
     
     # 5. 최종 압축 리트리버 생성 및 저장
