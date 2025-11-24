@@ -59,10 +59,11 @@ class KakaoService:
 
     async def _get_kakao_access_token(self, code: str) -> str:
         headers = {"Content-type": "application/x-www-form-urlencoded;charset=utf-8"}
+        android_redirect_uri = "kakaobb30f164f208df568bc0c2a1d39d20b0://oauth"
         data = {
             "grant_type": "authorization_code",
             "client_id": self.kakao_rest_api_key,
-            "redirect_uri": self.kakao_redirect_uri,
+            "redirect_uri": android_redirect_uri,
             "code": code,
         }
         async with httpx.AsyncClient() as client:
