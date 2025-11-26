@@ -7,6 +7,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from ddgs import DDGS
+from langchain_openai import ChatOpenAI
 
 from src.core import get_db_langchain, OPENWEATHER_API_KEY, llm_default, llm_rag, create_query_processing_chain
 from src.data_loader import get_jeju_coordinates
@@ -126,27 +127,130 @@ def get_date_weather_summary(location: str, date: str) -> str:
         return f"OWM (특정 날짜) 오류: {str(e)}"
 
 
-# --- 3. 사고 통계 도구 (Tool 3) ---
+# --- 3. 사고 통계 도구 (Tool 3) - 최적화된 버전 ---
+
+# SQL Agent용 상세 프롬프트
+SQL_AGENT_PREFIX = """
+당신은 제주도 관광객 안전사고 데이터베이스 전문가입니다.
+
+[데이터베이스 정보]
+테이블명: jeju_accidents
+
+[컬럼 상세 정보]
+1. SEASN_NM (계절명, TEXT)
+   - 값: '봄', '여름', '가을', '겨울', '알수없음'
+   
+2. ACDNT_OCRN_LOT (사고발생경도, DOUBLE PRECISION)
+   - 제주도 경도 좌표 (126.x)
+   
+3. ACDNT_OCRN_LAT (사고발생위도, DOUBLE PRECISION)
+   - 제주도 위도 좌표 (33.x)
+   
+4. DCLR_MM (신고월, BIGINT)
+   - 값: 1~12 (1월~12월)
+   
+5. PTN_SYM_SE_NM (환자증상구분명, TEXT)
+   - 주요 값: '낙상', '열사병', '기타통증', '두통', '복통', '알수없음' 등
+   - 가장 중요한 사고 유형 분류 컬럼
+   
+6. ACDNT_INJR_NM (사고부상명, TEXT)
+   - 주요 값: '골절', '타박상', '찰과상', '염좌', '알수없음' 등
+   - 부상 종류 분류 컬럼
+   
+7. DCLR_YR (신고연도, BIGINT)
+   - 현재 데이터: 2025년
+
+[중요 규칙]
+1. NULL 값은 모두 '알수없음'으로 저장되어 있습니다
+2. 최근 데이터 조회 시 DCLR_YR, DCLR_MM 활용
+3. 사고 유형은 PTN_SYM_SE_NM, 부상 유형은 ACDNT_INJR_NM 사용
+4. 간결하고 효율적인 SQL 쿼리 작성
+5. GROUP BY, COUNT, ORDER BY를 적극 활용
+
+[쿼리 작성 예시]
+- 최근 사고 유형: SELECT PTN_SYM_SE_NM, COUNT(*) FROM jeju_accidents WHERE DCLR_YR = 2025 GROUP BY PTN_SYM_SE_NM ORDER BY COUNT(*) DESC LIMIT 5;
+- 계절별 통계: SELECT SEASN_NM, COUNT(*) FROM jeju_accidents GROUP BY SEASN_NM;
+- 월별 추이: SELECT DCLR_MM, COUNT(*) FROM jeju_accidents WHERE DCLR_YR = 2025 GROUP BY DCLR_MM ORDER BY DCLR_MM;
+
+정확하고 빠른 쿼리를 한 번에 생성하세요.
+"""
+
+SQL_AGENT_SUFFIX = """
+[최종 지침]
+1. 이미 테이블 스키마를 알고 있으므로 sql_db_schema 도구를 다시 호출하지 마세요
+2. 쿼리 검증(sql_db_query_checker)은 복잡한 쿼리에만 사용하세요
+3. 간단한 집계 쿼리는 바로 sql_db_query로 실행하세요
+4. 결과를 한국어로 자연스럽게 설명하세요
+
+질문: {input}
+생각 과정: {agent_scratchpad}
+"""
+
 db_instance = get_db_langchain()
 
 sql_agent_executor = create_sql_agent(
     llm=llm_default,
     db=db_instance,
+    agent_type="openai-tools",  # 최신 agent 타입
+    prefix=SQL_AGENT_PREFIX,
+    suffix=SQL_AGENT_SUFFIX,
     verbose=True,
-    handle_parsing_errors=True
+    handle_parsing_errors=True,
+    max_iterations=5,  # 충분히 증가
+    max_execution_time=60,  # 60초 타임아웃
+    agent_executor_kwargs={
+        "return_intermediate_steps": False,  # 중간 단계 반환 비활성화로 속도 향상
+    }
 )
 
 @tool
 def jeju_safety_statistics_db(query: str) -> str:
     """
+    제주도 관광객 안전사고 통계 데이터베이스를 조회합니다.
+    
+    [데이터베이스 컬럼 정보]
+    - SEASN_NM: 계절(봄/여름/가을/겨울)
+    - DCLR_YR, DCLR_MM: 신고 연도 및 월
+    - PTN_SYM_SE_NM: 사고 유형(낙상, 열사병, 기타통증 등)
+    - ACDNT_INJR_NM: 부상 유형(골절, 타박상, 찰과상 등)
+    - ACDNT_OCRN_LOT, ACDNT_OCRN_LAT: 사고 발생 위치(경도, 위도)
+    
+    [질문 예시]
+    - "2025년 최근 사고 유형별 통계"
+    - "여름철 가장 많이 발생하는 사고는?"
+    - "낙상 사고가 가장 많이 발생하는 계절은?"
+    - "월별 사고 발생 추이"
+    
+    Args:
+        query (str): 데이터베이스에 대한 자연어 질문
+    """
+    print(f"[Tool] SQL Agent 도구 호출됨: {query}")
+    try:
+        result = sql_agent_executor.invoke({"input": query})
+        output = result.get("output", "")
+        
+        # 결과가 비어있거나 에러인 경우 처리
+        if not output or "error" in output.lower():
+            return "데이터베이스 조회 중 문제가 발생했습니다. 질문을 더 구체적으로 말씀해 주시겠어요?"
+        
+        return output
+    except Exception as e:
+        print(f"[Tool] SQL Agent 오류: {str(e)}")
+        return f"데이터베이스 조회 중 오류가 발생했습니다: {str(e)}"
+
+
+@tool
+def jeju_safety_statistics_db(query: str) -> str:
+    """
     제주도 관광객 안전 사고 통계(DB)에 대한 질문에 답할 때 사용됩니다.
-    예: '낙상 사고 건수', '제주시 사고 다발 장소', '겨울철 사고 유형' 등
+    예: '낙상 사고 건수', '제주시 사고 다발 장소', '겨울철 사고 유형', '복통 환자 수' 등
     질문 전체를 입력으로 전달해야 합니다.
     
     Args:
         query (str): SQL 에이전트에게 전달할 원본 사용자 질문
     """
     print(f"[Tool] SQL Agent 도구 호출됨: {query}")
+    
     try:
         result = sql_agent_executor.invoke({"input": query})
         return result.get("output", "SQL 에이전트 실행 중 오류가 발생했습니다.")
