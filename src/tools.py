@@ -168,8 +168,7 @@ def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
 local_rag_chain = (
-    {"context": query_chain | format_docs, "question": RunnablePassthrough()}
-    | prompt_rag
+    prompt_rag
     | llm_default
     | StrOutputParser()
 )
@@ -243,8 +242,11 @@ def jeju_tourism_rag_search(query: str) -> str:
         
         # 3. (RAG 성공) 필터링된 문서로 답변 생성
         print(f"[RAG] 1-2. 로컬 문서 {len(docs)}개 청크로 답변 생성.")
-        # local_rag_chain을 실행 (이미 리트리버가 실행되었으므로 수동 주입)
+
+        context_text = format_docs(docs)
+
         local_answer = local_rag_chain.invoke({
+            "context": context_text,  # 검색된 내용 재사용
             "question": query
         })
 
