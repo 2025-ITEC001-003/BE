@@ -7,6 +7,7 @@ from typing import cast, Dict, Any
 from langchain_core.documents import Document
 from langchain_postgres.vectorstores import PGVector
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from llama_cloud_services.parse.utils import ResultType
 
 from src.core import DATABASE_URL, get_cached_embedder, COLLECTION_NAME, engine
 
@@ -124,9 +125,8 @@ for pdf_path in files_to_process:
                 high_res_ocr=True,
                 adaptive_long_table=True,
                 outlined_table_extraction=True,
-                output_tables_as_HTML=True,
                 precise_bounding_box=True,
-                # omit explicit result_type to match expected enum/signature
+                result_type=ResultType.MD,
                 num_workers=8,
                 verbose=True,
                 language="ko"

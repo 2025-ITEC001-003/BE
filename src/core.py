@@ -1,10 +1,12 @@
 import os
+from typing import List
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from langchain_community.utilities import SQLDatabase
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_core.runnables import Runnable
 
-# LangChain 1.0+에서는 아래 모듈들이 langchain_classic으로 이동
+# LangChain 1.0+ 이동 모듈
 from langchain_classic.storage import LocalFileStore
 from langchain_community.retrievers import BM25Retriever
 from langchain_classic.embeddings import CacheBackedEmbeddings
@@ -21,12 +23,17 @@ from langchain_community.document_transformers import (
     LongContextReorder
 )
 
-# langchain_core와 langchain_postgres는 그대로 유지
+# Core 및 Postgres
 from langchain_core.documents import Document
 from langchain_postgres.vectorstores import PGVector
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from util.stopwords import get_korean_stopwords
 from src.kiwi_tokenizer import KiwiBM25Tokenizer
 from langchain_cohere import CohereRerank
+from langchain_core.prompts import ChatPromptTemplate, load_prompt
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 
 # .env 파일 로드
 load_dotenv()
@@ -36,7 +43,11 @@ OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 COHERE_API_KEY = os.getenv("COHERE_API_KEY")
 
-# OpenAI API 키를 환경변수에 명시적으로 설정
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+CORE_DIR = os.path.dirname(CURRENT_DIR)
+PROMPT_FILE = os.path.join(CORE_DIR, "prompts", "search_query_translation.yaml")
+
+# API 키 환경변수 설정
 if OPENAI_API_KEY:
     os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
 if OPENWEATHER_API_KEY:
@@ -44,41 +55,36 @@ if OPENWEATHER_API_KEY:
 if DEEPSEEK_API_KEY:
     os.environ["DEEPSEEK_API_KEY"] = DEEPSEEK_API_KEY
 
-# llm_default : ConversationSummaryBufferMemory 요약, sql_agent
+# LLM 설정
 llm_default = ChatOpenAI(
-    model="gpt-4.1-mini",
+    model="gpt-4.1",
     temperature=1
 )
 
-# RAG용 llm (stream option 미포함)
 llm_rag = ChatOpenAI(
-    model="gpt-4.1",
+    model="gpt-5.1",
     temperature=0,
     max_retries=10,
     timeout=120
 )
 
-# llm_streaming : 메인 스트리밍 Agent용 (토큰 추적 옵션 포함)
 llm_streaming = ChatOpenAI(
-    model="gpt-4.1", 
+    model="gpt-5.1", 
     temperature=0, 
     model_kwargs={
         "stream_options": {"include_usage": True}
     }
 )
 
-# --- PostgreDB 싱글톤 (기존) ---
+# --- PostgreDB 싱글톤 ---
 engine = create_engine(DATABASE_URL or "")
 _db_langchain= None
 
 def get_db_langchain():
     global _db_langchain
-
     if _db_langchain is not None:
         return _db_langchain
-
     _db_langchain = SQLDatabase(engine=engine, include_tables=['jeju_accidents'])
-
     return _db_langchain
 
 # --- Cached Embedder 싱글톤 ---
@@ -90,17 +96,12 @@ def get_cached_embedder():
         return _cached_embedder_instance
 
     print("Initializing CacheBackedEmbeddings...")
-    # 캐시를 저장할 로컬 파일 저장소 설정
     store = LocalFileStore(root_path="./.cache/embeddings")
-    
-    # 기본 임베딩 모델 (OpenAI)
     underlying_embeddings = OpenAIEmbeddings()
-    
-    # 캐시 지원 임베딩 모델 생성
     _cached_embedder_instance = CacheBackedEmbeddings.from_bytes_store(
         underlying_embeddings, 
         store, 
-        namespace="tourism_docs" # 캐시 ID
+        namespace="tourism_docs"
     )
     return _cached_embedder_instance
 
@@ -121,12 +122,11 @@ def get_vector_store():
     )
     return _vector_store_instance
 
-# --- BM25 Retriever 싱글톤 ---
+# --- BM25 관련 유틸리티 ---
 _bm25_retriever_instance = None
 _korean_bm25_tokenizer = None 
 
 def get_korean_bm25_tokenizer():
-    """불용어를 로드하고 KiwiBM25Tokenizer를 초기화하는 싱글톤 함수"""
     global _korean_bm25_tokenizer
     if _korean_bm25_tokenizer is not None:
         return _korean_bm25_tokenizer
@@ -137,12 +137,7 @@ def get_korean_bm25_tokenizer():
     return _korean_bm25_tokenizer
 
 def load_documents_from_vectorstore():
-    """
-    벡터스토어(DB)에서 문서를 로드합니다.
-    BM25 리트리버 초기화 및 RAGAS 평가용 문서 생성에 사용됩니다.
-    """
     print("벡터스토어에서 문서 로드 중...")
-    
     sql_query = f"""
         SELECT document, cmetadata 
         FROM langchain_pg_embedding
@@ -150,7 +145,6 @@ def load_documents_from_vectorstore():
             SELECT uuid FROM langchain_pg_collection WHERE name = '{COLLECTION_NAME}'
         );
     """
-    
     documents = []
     try:
         with engine.connect() as connection:
@@ -159,48 +153,87 @@ def load_documents_from_vectorstore():
                 documents.append(Document(page_content=row[0], metadata=row[1]))
         
         print(f"✅ 벡터스토어에서 {len(documents)}개 문서 로드 완료")
-        
         if not documents:
             print("❌ 로드된 문서가 없습니다. 벡터스토어를 확인하세요.")
             return []
-        
         return documents
-        
     except Exception as e:
         print(f"❌ 벡터스토어 로드 실패: {e}")
         return []
 
 def get_bm25_retriever():
-    """
-    BM25Retriever 싱글톤 객체를 반환합니다.
-    최초 호출 시 load_documents_from_vectorstore()를 사용하여
-    DB(PGVector)에 저장된 원본 텍스트를 로드합니다.
-    """
     global _bm25_retriever_instance
     if _bm25_retriever_instance is not None:
         return _bm25_retriever_instance
 
     print("Initializing BM25Retriever (from PGVector's stored documents)...")
-    
-    # DB에서 문서 로드
     splits_from_db = load_documents_from_vectorstore()
 
-    # BM25 리트리버 생성
     if not splits_from_db:
         print("❌ BM25 Error: DB에 문서가 없어 'splits'가 비어있습니다.")
-        _bm25_retriever_instance = BM25Retriever.from_documents([], k=5)
+        _bm25_retriever_instance = BM25Retriever.from_documents([], k=10)
     else:
         _bm25_retriever_instance = BM25Retriever.from_documents(
             splits_from_db, 
-            k=5,
-            custom_tokenizer=get_korean_bm25_tokenizer()
+            k=10,
+            preprocess_func=get_korean_bm25_tokenizer()
         )
-    
     print("BM25Retriever initialization complete.")
     return _bm25_retriever_instance
 
+# KEYWORD_extraction_PROMPT = ChatPromptTemplate.from_template(
+#     """
+#     You are a search query optimizer for a Jeju tourism database.
+#     Extract only the essential search keywords from the user's question.
+    
+#     Rules:
+#     1. Extract ONLY: Location (e.g., 추자면, 제주시), Place Type (e.g., 식당, 카페, 관광지), and Specific Menu/Item.
+#     2. REMOVE: User context (e.g., 나 같은, 에코 여행자, 혼자), Polite phrases (e.g., 알려줘, 추천해줘), General terms (e.g., 이름, 곳, 데).
+#     3. Output just the keywords separated by space.
+
+#     User Question: {question}
+#     Keywords:
+#     """
+# )
+
+# # 2. 키워드 추출 체인 생성 함수
+# def get_keyword_extraction_chain():
+#     return KEYWORD_extraction_PROMPT | llm_default | StrOutputParser()
+
+# class SmartBM25Retriever(BaseRetriever):
+#     """
+#     LLM을 통해 쿼리에서 핵심 키워드(장소, 카테고리 등)만 추출한 뒤 BM25 검색을 수행하는 래퍼
+#     """
+#     vector_retriever: BM25Retriever
+#     keyword_chain: Runnable
+    
+#     def _get_relevant_documents(
+#         self, query: str, *, run_manager: CallbackManagerForRetrieverRun
+#     ) -> List[Document]:
+#         cleaned_query = self.keyword_chain.invoke({"question": query})
+#         print(f"🧹 [SmartBM25] 원본 쿼리: '{query}' -> 정제된 키워드: '{cleaned_query}'")
+        
+#         return self.vector_retriever.invoke(cleaned_query)
+
+# --- 쿼리 처리 체인 ---
+def get_query_rewrite_chain():
+    llm = ChatOpenAI(model="gpt-5.1", temperature=0)
+    
+    try:
+        prompt = load_prompt(PROMPT_FILE)
+    except Exception as e:
+        print(f"⚠️ 프롬프트 로드 실패, 기본 프롬프트를 사용합니다: {e}")
+        from langchain_core.prompts import ChatPromptTemplate
+        prompt = ChatPromptTemplate.from_template(
+            "Translate the following to natural Korean for search: {question}"
+        )
+    
+    return prompt | llm | StrOutputParser()
+
+
 # --- 최종 RAG 리트리버 싱글톤 ---
 _compression_retriever_instance = None
+
 def get_compression_retriever():
     """
     압축/필터링 기능이 포함된 최종 앙상블 리트리버 싱글톤 객체를 반환합니다.
@@ -210,18 +243,25 @@ def get_compression_retriever():
         return _compression_retriever_instance
 
     print("Initializing Compression Retriever (Ensemble + Filters)...")
+
+    # 1. 의미(Vector) 리트리버: 자연어 쿼리 선호
+    vector_retriever = get_vector_store().as_retriever(search_kwargs={"k": 10})
     
-    # 1. 의미, 키워드 리트리버 가져오기
-    vector_retriever = get_vector_store().as_retriever(search_kwargs={"k": 5})
-    bm25_retriever = get_bm25_retriever()
+    # 2. 키워드(BM25) 리트리버: 키워드 쿼리 선호(bm25 내부에서 등록한 토크나이저를 통해 쿼리에서 키워드 추출 작업 수행)
+    raw_bm25_retriever = get_bm25_retriever()
+
+    # smart_bm25_retriever = SmartBM25Retriever(
+    #     vector_retriever=raw_bm25_retriever,
+    #     keyword_chain=get_keyword_extraction_chain()
+    # )
     
-    # 2. 앙상블 리트리버 생성
+    # 3. 앙상블 리트리버 생성
     ensemble_retriever = EnsembleRetriever(
-        retrievers=[bm25_retriever, vector_retriever],
+        retrievers=[raw_bm25_retriever, vector_retriever],
         weights=[0.5, 0.5]
     )
     
-    # 3. 압축 필터 생성 (임베더 싱글톤 사용)
+    # 4. 압축 필터 생성
     cached_embedder = get_cached_embedder()
     
     redundant_filter = EmbeddingsRedundantFilter(
@@ -230,23 +270,22 @@ def get_compression_retriever():
     )
     relevance_filter = EmbeddingsFilter(
         embeddings=cached_embedder,
-        similarity_threshold=0.80
+        similarity_threshold=0.75
     )
 
     reorder_transformer = LongContextReorder()
 
     reranker = CohereRerank(
-        model="rerank-multilingual-v3.0", # 최신 다국어 모델 사용 (한국어 포함)
+        model="rerank-multilingual-v3.0",
         top_n=3
     )
-
     
-    # 4. 압축 파이프라인 생성
+    # 5. 압축 파이프라인 생성
     pipeline_compressor = DocumentCompressorPipeline(
         transformers=[redundant_filter, relevance_filter, reranker, reorder_transformer]
     )
     
-    # 5. 최종 압축 리트리버 생성 및 저장
+    # 6. 최종 압축 리트리버 생성
     _compression_retriever_instance = ContextualCompressionRetriever(
         base_compressor=pipeline_compressor,
         base_retriever=ensemble_retriever
@@ -255,53 +294,106 @@ def get_compression_retriever():
     print("Compression Retriever initialization complete.")
     return _compression_retriever_instance
 
-# --- 디버깅용: 리트리버 각 단계별 결과 확인 함수 ---
+def create_query_processing_chain():
+    """
+    사용자 쿼리 → 영어/한국어 자연어 최적화 → 리트리버 호출
+    (키워드 변환은 이제 리트리버 내부에서 수행됨)
+    """
+    
+    query_rewriter = get_query_rewrite_chain()
+    compression_retriever = get_compression_retriever()
+    
+    processing_chain = (
+        {"question": RunnablePassthrough()}
+        | query_rewriter                      # 1. 자연어 최적화 (번역 및 의도 파악)
+        | compression_retriever               # 2. 최종 문서 검색
+    )
+    return processing_chain
+
+# --- 디버깅용 체인 ---
+def create_debug_query_chain():
+    """
+    각 단계의 중간 결과를 확인할 수 있는 디버깅 체인
+    """
+    query_rewriter = get_query_rewrite_chain()
+    
+    def log_optimized_query(query: str) -> str:
+        print(f"🔹 한글 자연어 쿼리: {query}")
+        return query
+    
+    def log_retrieval_results(docs):
+        print(f"🔹 검색된 문서 수: {len(docs)}")
+        for i, doc in enumerate(docs[:5], 1):
+            # [수정] f-string 내부 백슬래시 에러 방지를 위해 변수에 할당 후 출력
+            content = doc.page_content[:60].replace('\n', ' ')
+            print(f"   {i}. {content}...")
+        return docs
+    
+    compression_retriever = get_compression_retriever()
+    
+    debug_chain = (
+        {"question": RunnablePassthrough()}
+        | query_rewriter
+        | RunnableLambda(log_optimized_query)
+        | compression_retriever
+        | RunnableLambda(log_retrieval_results)
+    )
+    
+    return debug_chain
+
 def debug_retriever_pipeline(query: str):
     """
-    리트리버 파이프라인의 각 단계를 분석하여 디버깅합니다.
-    - Stage 1: BM25 결과
-    - Stage 2: Vector 결과
-    - Stage 3: Ensemble 결과
-    - Stage 4: 필터링 후 최종 결과
+    리트리버 파이프라인 디버깅 함수
     """
     print("\n" + "="*60)
-    print(f"🔍 디버깅: 쿼리 = '{query}'")
-    print("="*60)
+    print(f"🔍 디버깅: 원본 쿼리 = '{query}'")
     
-    # Stage 1: BM25
-    bm25_ret = get_bm25_retriever()
-    bm25_docs = bm25_ret.invoke(query)
-    print(f"\n[Stage 1] BM25 검색 결과: {len(bm25_docs)}개")
-    for i, doc in enumerate(bm25_docs, 1):
-        content_preview = doc.page_content[:80].replace('\n', ' ')
-        print(f"  {i}. {content_preview}...")
+    rewriter = get_query_rewrite_chain()
+    optimized_query = rewriter.invoke({"question": query})
+    print(f"📝 최적화된 쿼리 (자연어): {optimized_query}")
+    print("="*60)
+
+    # Stage 1: BM25 (Wrapped)
+    print("\n[Stage 1] BM25 검색 (내부적으로 키워드 변환 수행)")
+    raw_bm25_retriever = get_bm25_retriever()
+
+    # smart_bm25_retriever = SmartBM25Retriever(
+    #     vector_retriever=raw_bm25_retriever,
+    #     keyword_chain=get_keyword_extraction_chain()
+    # )
+
+    bm25_docs = raw_bm25_retriever.invoke(optimized_query)
+    for i, doc in enumerate(bm25_docs[:3], 1):
+        # [수정] 에러 방지용 변수 할당
+        content = doc.page_content[:80].replace('\n', ' ')
+        print(f"  {i}. {content}...")
     
     # Stage 2: Vector
-    vector_ret = get_vector_store().as_retriever(search_kwargs={"k": 5})
-    vector_docs = vector_ret.invoke(query)
-    print(f"\n[Stage 2] Vector 검색 결과: {len(vector_docs)}개")
-    for i, doc in enumerate(vector_docs, 1):
-        content_preview = doc.page_content[:80].replace('\n', ' ')
-        print(f"  {i}. {content_preview}...")
+    print("\n[Stage 2] Vector 검색 (자연어 쿼리 사용)")
+    vector_ret = get_vector_store().as_retriever(search_kwargs={"k": 10})
+    vector_docs = vector_ret.invoke(optimized_query)
+    for i, doc in enumerate(vector_docs[:3], 1):
+        content = doc.page_content[:80].replace('\n', ' ')
+        print(f"  {i}. {content}...")
     
     # Stage 3: Ensemble
+    print("\n[Stage 3] Ensemble 통합 결과")
     ensemble_ret = EnsembleRetriever(
-        retrievers=[bm25_ret, vector_ret],
+        retrievers=[raw_bm25_retriever, vector_ret],
         weights=[0.5, 0.5]
     )
-    ensemble_docs = ensemble_ret.invoke(query)
-    print(f"\n[Stage 3] Ensemble 통합 결과: {len(ensemble_docs)}개")
-    for i, doc in enumerate(ensemble_docs, 1):
-        content_preview = doc.page_content[:80].replace('\n', ' ')
-        print(f"  {i}. {content_preview}...")
+    ensemble_docs = ensemble_ret.invoke(optimized_query)
+    for i, doc in enumerate(ensemble_docs[:3], 1):
+        content = doc.page_content[:80].replace('\n', ' ')
+        print(f"  {i}. {content}...")
     
-    # Stage 4: Final (Compression + Filters)
+    # Stage 4: Final
+    print("\n[Stage 4] 필터링 최종 결과")
     compression_ret = get_compression_retriever()
-    final_docs = compression_ret.invoke(query)
-    print(f"\n[Stage 4] 필터링 최종 결과: {len(final_docs)}개")
+    final_docs = compression_ret.invoke(optimized_query)
     for i, doc in enumerate(final_docs, 1):
-        content_preview = doc.page_content[:100].replace('\n', ' ')
-        print(f"  {i}. {content_preview}...")
+        content = doc.page_content[:100].replace('\n', ' ')
+        print(f"  {i}. {content}...")
     
     print("\n" + "="*60)
     return final_docs

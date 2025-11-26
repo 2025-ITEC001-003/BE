@@ -19,7 +19,7 @@ load_dotenv()
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 RAG_EVAL_DIR = os.path.dirname(CURRENT_DIR)
 PROJECT_ROOT = os.path.dirname(RAG_EVAL_DIR)
-DATASET_FILE = os.path.join(RAG_EVAL_DIR, "dataset", "english_testset.csv")
+DATASET_FILE = os.path.join(RAG_EVAL_DIR, "dataset", "korean_testset_origin.csv")
 LANGSMITH_PROJECT = "Jeju_RAG_Evaluation_v1" 
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 EVAL_RESULT_PATH = os.path.join(RAG_EVAL_DIR, "result", f"ragas_results_{timestamp}.csv")
@@ -97,8 +97,8 @@ def run_evaluation():
     df = pd.read_csv(DATASET_FILE)
     print(f"1. 한국어 데이터셋 로드 완료 (총 {len(df)}개 질문)")
     
-    questions = df['user_input'].tolist()
-    ground_truths = df['reference'].tolist()
+    questions = df['question'].tolist()
+    ground_truths = df['ground_truth'].tolist()
     
     print("2. RAG Tool 실행 및 결과 수집 시작...")
     
