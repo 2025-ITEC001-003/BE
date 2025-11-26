@@ -27,7 +27,7 @@ PROMPT_FILE = os.path.join(PROJECT_ROOT, "prompts", "jeju_tourism_rag_prompt.yam
 
 # Rate Limit 완화 설정
 eval_llm = ChatOpenAI(
-    model="gpt-5-nano",
+    model="gpt-4.1-mini",
     temperature=1,
     max_retries=5,  # 재시도 횟수 증가
     timeout=60,
