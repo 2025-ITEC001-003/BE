@@ -55,20 +55,20 @@ if DEEPSEEK_API_KEY:
 
 # LLM 설정
 llm_default = ChatOpenAI(
-    model="gpt-5-mini",
-    temperature=0
+    model="gpt-4.1-mini",
+    temperature=1
 )
 
 llm_rag = ChatOpenAI(
-    model="gpt-5.1",
+    model="gpt-4.1",
     temperature=0,
     max_retries=10,
     timeout=120
 )
 
 llm_streaming = ChatOpenAI(
-    model="gpt-5.1", 
-    temperature=0, 
+    model="gpt-4.1", 
+    temperature=1, 
     model_kwargs={
         "stream_options": {"include_usage": True}
     }
