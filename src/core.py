@@ -1,9 +1,10 @@
 import os
-from typing import List, Callable
+from typing import List
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from langchain_community.utilities import SQLDatabase
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_core.runnables import Runnable
 
 # LangChain 1.0+ 이동 모듈
 from langchain_classic.storage import LocalFileStore
@@ -170,16 +171,49 @@ def get_bm25_retriever():
 
     if not splits_from_db:
         print("❌ BM25 Error: DB에 문서가 없어 'splits'가 비어있습니다.")
-        _bm25_retriever_instance = BM25Retriever.from_documents([], k=5)
+        _bm25_retriever_instance = BM25Retriever.from_documents([], k=10)
     else:
         _bm25_retriever_instance = BM25Retriever.from_documents(
             splits_from_db, 
-            k=5,
+            k=10,
             preprocess_func=get_korean_bm25_tokenizer()
         )
     print("BM25Retriever initialization complete.")
     return _bm25_retriever_instance
 
+# KEYWORD_extraction_PROMPT = ChatPromptTemplate.from_template(
+#     """
+#     You are a search query optimizer for a Jeju tourism database.
+#     Extract only the essential search keywords from the user's question.
+    
+#     Rules:
+#     1. Extract ONLY: Location (e.g., 추자면, 제주시), Place Type (e.g., 식당, 카페, 관광지), and Specific Menu/Item.
+#     2. REMOVE: User context (e.g., 나 같은, 에코 여행자, 혼자), Polite phrases (e.g., 알려줘, 추천해줘), General terms (e.g., 이름, 곳, 데).
+#     3. Output just the keywords separated by space.
+
+#     User Question: {question}
+#     Keywords:
+#     """
+# )
+
+# # 2. 키워드 추출 체인 생성 함수
+# def get_keyword_extraction_chain():
+#     return KEYWORD_extraction_PROMPT | llm_default | StrOutputParser()
+
+# class SmartBM25Retriever(BaseRetriever):
+#     """
+#     LLM을 통해 쿼리에서 핵심 키워드(장소, 카테고리 등)만 추출한 뒤 BM25 검색을 수행하는 래퍼
+#     """
+#     vector_retriever: BM25Retriever
+#     keyword_chain: Runnable
+    
+#     def _get_relevant_documents(
+#         self, query: str, *, run_manager: CallbackManagerForRetrieverRun
+#     ) -> List[Document]:
+#         cleaned_query = self.keyword_chain.invoke({"question": query})
+#         print(f"🧹 [SmartBM25] 원본 쿼리: '{query}' -> 정제된 키워드: '{cleaned_query}'")
+        
+#         return self.vector_retriever.invoke(cleaned_query)
 
 # --- 쿼리 처리 체인 ---
 def get_query_rewrite_chain():
@@ -211,10 +245,15 @@ def get_compression_retriever():
     print("Initializing Compression Retriever (Ensemble + Filters)...")
 
     # 1. 의미(Vector) 리트리버: 자연어 쿼리 선호
-    vector_retriever = get_vector_store().as_retriever(search_kwargs={"k": 5})
+    vector_retriever = get_vector_store().as_retriever(search_kwargs={"k": 10})
     
     # 2. 키워드(BM25) 리트리버: 키워드 쿼리 선호(bm25 내부에서 등록한 토크나이저를 통해 쿼리에서 키워드 추출 작업 수행)
     raw_bm25_retriever = get_bm25_retriever()
+
+    # smart_bm25_retriever = SmartBM25Retriever(
+    #     vector_retriever=raw_bm25_retriever,
+    #     keyword_chain=get_keyword_extraction_chain()
+    # )
     
     # 3. 앙상블 리트리버 생성
     ensemble_retriever = EnsembleRetriever(
@@ -231,19 +270,19 @@ def get_compression_retriever():
     )
     relevance_filter = EmbeddingsFilter(
         embeddings=cached_embedder,
-        similarity_threshold=0.7
+        similarity_threshold=0.75
     )
 
     reorder_transformer = LongContextReorder()
 
     reranker = CohereRerank(
         model="rerank-multilingual-v3.0",
-        top_n=5
+        top_n=3
     )
     
     # 5. 압축 파이프라인 생성
     pipeline_compressor = DocumentCompressorPipeline(
-        transformers=[redundant_filter, relevance_filter, reranker]
+        transformers=[redundant_filter, relevance_filter, reranker, reorder_transformer]
     )
     
     # 6. 최종 압축 리트리버 생성
@@ -317,6 +356,12 @@ def debug_retriever_pipeline(query: str):
     # Stage 1: BM25 (Wrapped)
     print("\n[Stage 1] BM25 검색 (내부적으로 키워드 변환 수행)")
     raw_bm25_retriever = get_bm25_retriever()
+
+    # smart_bm25_retriever = SmartBM25Retriever(
+    #     vector_retriever=raw_bm25_retriever,
+    #     keyword_chain=get_keyword_extraction_chain()
+    # )
+
     bm25_docs = raw_bm25_retriever.invoke(optimized_query)
     for i, doc in enumerate(bm25_docs[:3], 1):
         # [수정] 에러 방지용 변수 할당
@@ -325,7 +370,7 @@ def debug_retriever_pipeline(query: str):
     
     # Stage 2: Vector
     print("\n[Stage 2] Vector 검색 (자연어 쿼리 사용)")
-    vector_ret = get_vector_store().as_retriever(search_kwargs={"k": 5})
+    vector_ret = get_vector_store().as_retriever(search_kwargs={"k": 10})
     vector_docs = vector_ret.invoke(optimized_query)
     for i, doc in enumerate(vector_docs[:3], 1):
         content = doc.page_content[:80].replace('\n', ' ')
