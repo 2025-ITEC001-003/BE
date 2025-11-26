@@ -55,12 +55,12 @@ if DEEPSEEK_API_KEY:
 
 # LLM 설정
 llm_default = ChatOpenAI(
-    model="gpt-4.1",
-    temperature=1
+    model="gpt-5-nano",
+    temperature=0
 )
 
 llm_rag = ChatOpenAI(
-    model="gpt-5.1",
+    model="gpt-5-nano",
     temperature=0,
     max_retries=10,
     timeout=120
@@ -184,7 +184,7 @@ def get_bm25_retriever():
 
 # --- 쿼리 처리 체인 ---
 def get_query_rewrite_chain():
-    llm = ChatOpenAI(model="gpt-5.1", temperature=0)
+    llm = ChatOpenAI(model="gpt-5-nano", temperature=0)
     
     try:
         prompt = load_prompt(PROMPT_FILE)
@@ -244,7 +244,7 @@ def get_compression_retriever():
     
     # 5. 압축 파이프라인 생성
     pipeline_compressor = DocumentCompressorPipeline(
-        transformers=[redundant_filter, relevance_filter, reranker, reorder_transformer]
+        transformers=[redundant_filter, reranker, reorder_transformer]
     )
     
     # 6. 최종 압축 리트리버 생성
