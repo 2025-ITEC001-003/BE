@@ -8,7 +8,7 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from ddgs import DDGS
 
-from src.core import get_db_langchain, OPENWEATHER_API_KEY, llm_default, llm_rag, get_compression_retriever
+from src.core import get_db_langchain, OPENWEATHER_API_KEY, llm_default, llm_rag, create_query_processing_chain
 from src.data_loader import get_jeju_coordinates
 
 # --- 1. '오늘/현재' 날씨 도구 (Tool 1 - OWM) ---
@@ -162,13 +162,13 @@ PROMPT_FILE = os.path.join(PROJECT_ROOT, "prompts", "jeju_tourism_rag_prompt.yam
 prompt_rag = load_prompt(PROMPT_FILE)
 
 # 앙상블 리트리버 + 문서 압축기 리트리버
-compression_retriever = get_compression_retriever()
+query_chain = create_query_processing_chain()
 
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
 local_rag_chain = (
-    {"context": compression_retriever | format_docs, "question": RunnablePassthrough()}
+    {"context": query_chain | format_docs, "question": RunnablePassthrough()}
     | prompt_rag
     | llm_default
     | StrOutputParser()
@@ -212,7 +212,7 @@ web_prompt_rag = ChatPromptTemplate.from_template(web_rag_prompt_template)
 web_rag_chain = (
     {"context": run_ddgs_search, "question": RunnablePassthrough()}
     | web_prompt_rag
-    | llm_default
+    | llm_rag
     | StrOutputParser()
 )
 
@@ -230,12 +230,12 @@ def jeju_tourism_rag_search(query: str) -> str:
     print(f"[Tool] RAG 도구 호출됨: {query}")
     
     try:
-        # 1. (시도) 압축 리트리버를 먼저 실행
+        # 1. 압축 리트리버를 먼저 실행
         print("[RAG] 1. 로컬 문서 검색 시도...")
         # (Ensemble -> RedundantFilter -> RelevanceFilter -> LongContextReorder(긴 문맥 재정렬) 실행)
-        docs = compression_retriever.invoke(query)
+        docs = query_chain.invoke(query)
 
-        # 2. (판단) 필터링된 문서가 있는지 확인
+        # 2. 필터링된 문서가 있는지 확인
         if not docs:
             # RelevanceFilter가 모든 문서를 '관련 없음'으로 판단
             print("[RAG] 1-1. 로컬 문서에 유효한 정보 없음. 웹 검색으로 대체.")
@@ -244,13 +244,7 @@ def jeju_tourism_rag_search(query: str) -> str:
         # 3. (RAG 성공) 필터링된 문서로 답변 생성
         print(f"[RAG] 1-2. 로컬 문서 {len(docs)}개 청크로 답변 생성.")
         # local_rag_chain을 실행 (이미 리트리버가 실행되었으므로 수동 주입)
-        generation_chain = (
-            prompt_rag
-            | llm_rag
-            | StrOutputParser()
-        )
-        local_answer = generation_chain.invoke({
-            "context": format_docs(docs),
+        local_answer = local_rag_chain.invoke({
             "question": query
         })
 

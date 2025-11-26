@@ -1,5 +1,6 @@
 import os
 import glob
+import tiktoken
 from sqlalchemy import text
 from llama_parse import LlamaParse
 from llama_index.core import SimpleDirectoryReader
@@ -51,8 +52,63 @@ def delete_existing_file_data(file_path, collection_name):
         conn.execute(sql, {"name": collection_name, "path": file_path})
         conn.commit()
     print(f"  🗑️ 기존 데이터 삭제 완료: {os.path.basename(file_path)}")
-    
 
+def token_length(text: str) -> int:
+    enc = tiktoken.encoding_for_model("gpt-4o")  # 사용하는 모델로 설정
+    return len(enc.encode(text))
+
+def create_korean_text_splitter():
+    """
+    한국어에 최적화된 텍스트 분할기 생성
+    """
+    return RecursiveCharacterTextSplitter(
+        chunk_size=500,
+        chunk_overlap=100,
+        # 한국어 문장 경계 고려
+        separators=[
+            "\n\n",              # 문단 구분
+            "\n",                # 줄바꿈
+            ". ",                # 마침표 + 공백 (영어 문장)
+            "。 ",               # 일본어/중국어 마침표
+            "? ",                # 물음표
+            "! ",                # 느낌표
+            "； ",               # 세미콜론
+            "，",                # 쉼표
+            " ",                 # 공백
+            "",                  # 최후의 수단
+        ],
+        # 길이 계산 함수 (토큰 수 기반으로 변경 가능)
+        length_function=token_length,
+        # 메타데이터에 청크 위치 정보 추가
+        keep_separator=True,
+    )
+
+def validate_chunk_quality(chunks: list[Document]) -> tuple[bool, str]:
+    """
+    생성된 청크의 품질을 검증
+    
+    Returns:
+        (is_valid, message)
+    """
+    if not chunks:
+        return False, "청크가 생성되지 않았습니다"
+    
+    # 평균 청크 크기 확인
+    avg_size = sum(token_length(c.page_content) for c in chunks) / len(chunks)
+    
+    if avg_size < 100:
+        return False, f"청크 크기가 너무 작습니다 (평균: {avg_size:.0f}토큰)"
+    
+    if avg_size > 2000:
+        return False, f"청크 크기가 너무 큽니다 (평균: {avg_size:.0f}토큰)"
+    
+    # 빈 청크 확인
+    empty_chunks = sum(1 for c in chunks if not c.page_content.strip())
+    if empty_chunks > 0:
+        return False, f"{empty_chunks}개의 빈 청크가 발견되었습니다"
+    
+    return True, f"✅ 청크 품질 검증 완료 (총 {len(chunks)}개, 평균 {avg_size:.0f}토큰)"
+    
 # 1. 파일 필터링
 all_pdf_files = glob.glob(os.path.join(DOCS_DIR, "*.pdf"))
 processed_files = get_processed_files(COLLECTION_NAME)
@@ -75,11 +131,7 @@ if not files_to_process:
 print(f"\n🚀 {len(files_to_process)}개 파일 처리를 시작합니다...")
 
 # 텍스트 분할기
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000,
-    chunk_overlap=200,
-    separators=["\n\n", "\n", " ", ""]
-)
+text_splitter = create_korean_text_splitter()
 
 # 벡터 스토어 연결
 vector_store = PGVector(
@@ -175,6 +227,13 @@ for pdf_path in files_to_process:
 
     # 청크 분할
     final_splits = text_splitter.split_documents([full_doc])
+
+    # 청크 품질 검증
+    is_valid, message = validate_chunk_quality(final_splits)
+    print(f"  {message}")
+    if not is_valid:
+        print(f"  ❌ 청크 품질 검증 실패. 처리 중단.")
+        continue
 
     # 청크 분할 결과 로컬 저장
     chunks_save_path = os.path.join(CHUNKS_DIR, f"{title}_chunks.md")

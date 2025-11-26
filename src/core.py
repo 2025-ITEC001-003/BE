@@ -26,12 +26,10 @@ from langchain_community.document_transformers import (
 # Core 및 Postgres
 from langchain_core.documents import Document
 from langchain_postgres.vectorstores import PGVector
-from langchain_core.retrievers import BaseRetriever
-from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from util.stopwords import get_korean_stopwords
 from src.kiwi_tokenizer import KiwiBM25Tokenizer
 from langchain_cohere import CohereRerank
-from langchain_core.prompts import ChatPromptTemplate, load_prompt
+from langchain_core.prompts import load_prompt
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 
@@ -234,7 +232,7 @@ def get_compression_retriever():
     )
     relevance_filter = EmbeddingsFilter(
         embeddings=cached_embedder,
-        similarity_threshold=0.68
+        similarity_threshold=0.5
     )
 
     reorder_transformer = LongContextReorder()
@@ -338,7 +336,7 @@ def debug_retriever_pipeline(query: str):
     print("\n[Stage 3] Ensemble 통합 결과")
     ensemble_ret = EnsembleRetriever(
         retrievers=[raw_bm25_retriever, vector_ret],
-        weights=[0.5, 0.5]
+        weights=[0.3, 0.7]
     )
     ensemble_docs = ensemble_ret.invoke(optimized_query)
     for i, doc in enumerate(ensemble_docs[:3], 1):
