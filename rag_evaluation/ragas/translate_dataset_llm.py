@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import json
 from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, load_prompt
 from dotenv import load_dotenv
 from tqdm import tqdm
 
@@ -15,27 +15,17 @@ INPUT_FILE = os.path.join(RAG_EVAL_DIR, "dataset", "english_testset.csv")
 OUTPUT_FILE = os.path.join(RAG_EVAL_DIR, "dataset", "korean_testset.csv")
 
 # 번역을 위한 LLM (빠르고 저렴한 mini 모델 사용)
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0)
 
 # 번역 프롬프트
-translation_prompt = ChatPromptTemplate.from_template(
-    """
-    You are a professional translator specializing in Jeju tourism content.
-    Your goal is to ensure the output is in **natural Korean (한국어)** suitable for a Korean tourist.
-
-    **Rules:**
-    1. If the input is in **English**, translate it into **Korean**.
-    2. If the input is already in **Korean**, **keep it as is** (do NOT translate it to English). You may slightly refine the grammar if needed, but the language must remain Korean.
-    3. For proper nouns (Jeju place names, food names), use the standard Korean terms (e.g., 'Seongsan Ilchulbong' -> '성산일출봉').
-
-    **Input Data:**
-    - Question: {user_input}
-    - Answer: {reference}
-
-    **Output Format:**
-    Return ONLY a valid JSON object with keys "user_input" and "reference".
-    """
-)
+try:
+    translation_prompt = load_prompt("../../prompts/search_query_translation.yaml")
+except Exception as e:
+    print(f"⚠️ 프롬프트 로드 실패, 기본 프롬프트를 사용합니다: {e}")
+    from langchain_core.prompts import ChatPromptTemplate
+    translation_prompt = ChatPromptTemplate.from_template(
+        "Translate the following to natural Korean: {question}"
+    )
 
 chain = translation_prompt | llm
 
