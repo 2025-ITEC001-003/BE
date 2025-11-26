@@ -8,7 +8,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL이 .env 파일에 설정되지 않았습니다.")
 
-CSV_FILE_PATH = "data/제주특별자치도관광객안전사고_2021.csv" 
+CSV_FILE_PATH = "data/Jeju_Safety_Accidents_2025.csv" 
 DB_TABLE_NAME = "jeju_accidents"
 
 #  DB에 저장할 최종 컬럼 리스트
