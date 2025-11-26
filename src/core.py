@@ -55,7 +55,8 @@ if DEEPSEEK_API_KEY:
 
 # LLM 설정
 llm_default = ChatOpenAI(
-    model="gpt-5-mini"
+    model="gpt-5-mini",
+    temperature=0
 )
 
 llm_rag = ChatOpenAI(
@@ -238,7 +239,7 @@ def get_compression_retriever():
 
     reranker = CohereRerank(
         model="rerank-multilingual-v3.0",
-        top_n=5
+        top_n=3
     )
     
     # 5. 압축 파이프라인 생성

@@ -212,7 +212,7 @@ web_prompt_rag = ChatPromptTemplate.from_template(web_rag_prompt_template)
 web_rag_chain = (
     {"context": run_ddgs_search, "question": RunnablePassthrough()}
     | web_prompt_rag
-    | llm_rag
+    | llm_default
     | StrOutputParser()
 )
 
