@@ -55,12 +55,11 @@ if DEEPSEEK_API_KEY:
 
 # LLM 설정
 llm_default = ChatOpenAI(
-    model="gpt-5-nano",
-    temperature=0
+    model="gpt-5-mini"
 )
 
 llm_rag = ChatOpenAI(
-    model="gpt-5-nano",
+    model="gpt-5.1",
     temperature=0,
     max_retries=10,
     timeout=120
