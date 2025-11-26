@@ -19,7 +19,17 @@ class KiwiBM25Tokenizer:
     @staticmethod
     def _tokenize(tokenizer: Kiwi, text: str) -> List[str]:
         # 형태소 분석 결과를 사용하며, 여기서는 '형태소 원형(form)'을 토큰으로 사용합니다.
-        return [token.form for token in tokenizer.tokenize(text)]
+        # 개선: 품사 태깅 활용하여 의미 있는 토큰만 추출
+        tokens = tokenizer.tokenize(text)
+        
+        # 명사(N), 동사(V), 형용사(VA), 부사(MAG)만 추출
+        meaningful_tokens = [
+            token.form 
+            for token in tokens
+            if (token.tag[0] in ['N', 'V', 'M'] and  # 품사 필터
+                len(token.form) > 1)  # 1글자 토큰 제거
+        ]
+        return meaningful_tokens
 
     @staticmethod
     def _setup_nltk() -> None:
@@ -29,6 +39,7 @@ class KiwiBM25Tokenizer:
             nltk.download("punkt")
 
     def __call__(self, text: str) -> List[str]:
+        
         # 토큰화 및 필터링
         tokens = self._tokenize(self._tokenizer, text)
         return [
