@@ -10,7 +10,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import load_prompt
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.documents import Document
-from src.core import get_compression_retriever, get_cached_embedder
+from src.core import get_cached_embedder, create_query_processing_chain
 from ragas.run_config import RunConfig
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -19,10 +19,10 @@ load_dotenv()
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 RAG_EVAL_DIR = os.path.dirname(CURRENT_DIR)
 PROJECT_ROOT = os.path.dirname(RAG_EVAL_DIR)
-DATASET_FILE = os.path.join(RAG_EVAL_DIR, "dataset", "korean_testset.csv")
+DATASET_FILE = os.path.join(RAG_EVAL_DIR, "dataset", "english_testset.csv")
 LANGSMITH_PROJECT = "Jeju_RAG_Evaluation_v1" 
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-EVAL_RESULT_PATH = os.path.join(RAG_EVAL_DIR, "result", f"korean_ragas_results_{timestamp}.csv")
+EVAL_RESULT_PATH = os.path.join(RAG_EVAL_DIR, "result", f"ragas_results_{timestamp}.csv")
 PROMPT_FILE = os.path.join(PROJECT_ROOT, "prompts", "jeju_tourism_rag_prompt.yaml")
 
 # Rate Limit 완화 설정
@@ -63,15 +63,13 @@ def get_ragas_evaluation_output(query: str) -> dict:
     except Exception as e:
         print(f"❌ 프롬프트 로드 오류: {e}")
         return {"answer": "프롬프트 로드 실패", "contexts": []}
-    
-    compression_retriever = get_compression_retriever()
-    
+
+
     try:
-        docs = compression_retriever.invoke(query)
+        docs = create_query_processing_chain().invoke({"question": query})
         
         if not docs:
             return {"answer": "정보를 찾을 수 없습니다.", "contexts": []}
-        
         
         generation_chain = (
             prompt_rag
@@ -109,7 +107,7 @@ def run_evaluation():
     # 2. RAG Tool만 직접 호출하여 답변 및 Contexts 수집
     for i, q in enumerate(questions):
         print(f"   > 질문 {i+1}/{len(questions)} 처리 중: {q[:30]}...")
-        
+
         tool_output = get_ragas_evaluation_output(q)
         
         # RAGAS Dataset 형식에 맞게 데이터 준비
@@ -122,7 +120,7 @@ def run_evaluation():
         
         # ⭐ Rate Limit 완화: 질문 간 1초 지연
         if i < len(questions) - 1:
-            time.sleep(5)
+            time.sleep(3)
 
     # 3. RAGAS 평가
     ragas_dataset = Dataset.from_list(results)
