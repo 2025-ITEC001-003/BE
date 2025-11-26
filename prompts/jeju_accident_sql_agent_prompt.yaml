@@ -1,0 +1,86 @@
+_type: prompt
+input_variables: []
+template: |
+  sql 조회가 필요한 질문은 아래 [sql agent log] 정보를 활용하고, 스키마 정보 조회를 하지 마세요. select * 구문은 지양하세요.
+
+  [sql agent log 정보]
+  [input1]
+  SELECT MAX(DCLR_YR) AS latest_year FROM jeju_accidents;
+  [output1]
+  Error: (psycopg2.errors.UndefinedColumn) column "dclr_yr" does not exist
+  LINE 1: SELECT MAX(DCLR_YR) AS latest_year FROM jeju_accidents;
+                    ^
+  [SQL: SELECT MAX(DCLR_YR) AS latest_year FROM jeju_accidents;]
+  (Background on this error at: https://sqlalche.me/e/20/f405)
+
+  [input2]
+  jeju_accidents
+  [output2]
+  CREATE TABLE jeju_accidents (
+    "SEASN_NM" TEXT, 
+    "ACDNT_OCRN_LOT" DOUBLE PRECISION, 
+    "ACDNT_OCRN_LAT" DOUBLE PRECISION, 
+    "DCLR_MM" BIGINT, 
+    "PTN_SYM_SE_NM" TEXT, 
+    "ACDNT_INJR_NM" TEXT, 
+    "DCLR_YR" BIGINT
+  )
+  /*
+  3 rows from jeju_accidents table:
+  SEASN_NM	ACDNT_OCRN_LOT	ACDNT_OCRN_LAT	DCLR_MM	PTN_SYM_SE_NM	ACDNT_INJR_NM	DCLR_YR
+  겨울	126.48464829	33.48869501	1	알수없음	알수없음	2025
+  겨울	126.18052106	33.35709479	1	기타통증	낙상	2025
+  겨울	126.61754495	33.26054516	1	두통	알수없음	2025
+  */
+
+  [input3]
+  SELECT DCLR_YR FROM jeju_accidents ORDER BY DCLR_YR DESC LIMIT 1;
+  [output3]
+  SELECT DCLR_YR FROM jeju_accidents ORDER BY DCLR_YR DESC LIMIT 1;
+
+  [input4]
+  SELECT ACDNT_INJR_NM, COUNT(*) AS accident_count 
+  FROM jeju_accidents 
+  WHERE DCLR_YR = (SELECT MAX(DCLR_YR) FROM jeju_accidents) 
+  GROUP BY ACDNT_INJR_NM 
+  ORDER BY accident_count DESC 
+  LIMIT 10;
+  [output4]
+  Error: (psycopg2.errors.UndefinedColumn) column "acdnt_injr_nm" does not exist
+  LINE 1: SELECT ACDNT_INJR_NM, COUNT(*) AS accident_count 
+                ^
+  [SQL: SELECT ACDNT_INJR_NM, COUNT(*) AS accident_count 
+  FROM jeju_accidents 
+  WHERE DCLR_YR = (SELECT MAX(DCLR_YR) FROM jeju_accidents) 
+  GROUP BY ACDNT_INJR_NM 
+  ORDER BY accident_count DESC 
+  LIMIT 10;
+  ]
+  (Background on this error at: https://sqlalche.me/e/20/f405)
+
+  [input5]
+  SELECT "ACDNT_INJR_NM", COUNT(*) AS accident_count 
+  FROM jeju_accidents 
+  WHERE "DCLR_YR" = (SELECT MAX("DCLR_YR") FROM jeju_accidents) 
+  GROUP BY "ACDNT_INJR_NM" 
+  ORDER BY accident_count DESC 
+  LIMIT 10;
+  [output5]
+  SELECT "ACDNT_INJR_NM", COUNT(*) AS accident_count 
+  FROM jeju_accidents 
+  WHERE "DCLR_YR" = (SELECT MAX("DCLR_YR") FROM jeju_accidents) 
+  GROUP BY "ACDNT_INJR_NM" 
+  ORDER BY accident_count DESC 
+  LIMIT 10;
+
+  [input6]
+  SELECT "ACDNT_INJR_NM", COUNT(*) AS accident_count 
+  FROM jeju_accidents 
+  WHERE "DCLR_YR" = (SELECT MAX("DCLR_YR") FROM jeju_accidents) 
+  GROUP BY "ACDNT_INJR_NM" 
+  ORDER BY accident_count DESC 
+  LIMIT 10;
+  [output6]
+  [('알수없음', 3431), ('낙상', 721), ('열상', 207), ('기타 둔상', 103), ('동물/곤충', 94), ('상해', 80), ('추락', 73), ('물', 14), ('기계', 12), ('고온체', 7)]
+  
+  답변:

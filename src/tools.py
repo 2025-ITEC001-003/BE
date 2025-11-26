@@ -12,6 +12,9 @@ from langchain_openai import ChatOpenAI
 from src.core import get_db_langchain, OPENWEATHER_API_KEY, llm_default, llm_rag, create_query_processing_chain
 from src.data_loader import get_jeju_coordinates
 
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
+
 # --- 1. '오늘/현재' 날씨 도구 (Tool 1 - OWM) ---
 @tool
 def get_current_weather(location: str) -> str:
@@ -128,52 +131,13 @@ def get_date_weather_summary(location: str, date: str) -> str:
 
 
 # --- 3. 사고 통계 도구 (Tool 3) - 최적화된 버전 ---
-
-# SQL Agent용 상세 프롬프트
-SQL_AGENT_PREFIX = """
-당신은 제주도 관광객 안전사고 데이터베이스 전문가입니다.
-
-[데이터베이스 정보]
-테이블명: jeju_accidents
-
-[컬럼 상세 정보]
-1. SEASN_NM (계절명, TEXT)
-   - 값: '봄', '여름', '가을', '겨울', '알수없음'
-   
-2. ACDNT_OCRN_LOT (사고발생경도, DOUBLE PRECISION)
-   - 제주도 경도 좌표 (126.x)
-   
-3. ACDNT_OCRN_LAT (사고발생위도, DOUBLE PRECISION)
-   - 제주도 위도 좌표 (33.x)
-   
-4. DCLR_MM (신고월, BIGINT)
-   - 값: 1~12 (1월~12월)
-   
-5. PTN_SYM_SE_NM (환자증상구분명, TEXT)
-   - 주요 값: '낙상', '열사병', '기타통증', '두통', '복통', '알수없음' 등
-   - 가장 중요한 사고 유형 분류 컬럼
-   
-6. ACDNT_INJR_NM (사고부상명, TEXT)
-   - 주요 값: '골절', '타박상', '찰과상', '염좌', '알수없음' 등
-   - 부상 종류 분류 컬럼
-   
-7. DCLR_YR (신고연도, BIGINT)
-   - 현재 데이터: 2025년
-
-[중요 규칙]
-1. NULL 값은 모두 '알수없음'으로 저장되어 있습니다
-2. 최근 데이터 조회 시 DCLR_YR, DCLR_MM 활용
-3. 사고 유형은 PTN_SYM_SE_NM, 부상 유형은 ACDNT_INJR_NM 사용
-4. 간결하고 효율적인 SQL 쿼리 작성
-5. GROUP BY, COUNT, ORDER BY를 적극 활용
-
-[쿼리 작성 예시]
-- 최근 사고 유형: SELECT PTN_SYM_SE_NM, COUNT(*) FROM jeju_accidents WHERE DCLR_YR = 2025 GROUP BY PTN_SYM_SE_NM ORDER BY COUNT(*) DESC LIMIT 5;
-- 계절별 통계: SELECT SEASN_NM, COUNT(*) FROM jeju_accidents GROUP BY SEASN_NM;
-- 월별 추이: SELECT DCLR_MM, COUNT(*) FROM jeju_accidents WHERE DCLR_YR = 2025 GROUP BY DCLR_MM ORDER BY DCLR_MM;
-
-정확하고 빠른 쿼리를 한 번에 생성하세요.
-"""
+SQL_PROMPT_FILE = os.path.join(PROJECT_ROOT, "prompts", "jeju_accident_sql_agent_prompt.yaml")
+try:
+    sql_prompt = load_prompt(SQL_PROMPT_FILE)
+    SQL_AGENT_PREFIX = sql_prompt.template
+except Exception as e:
+    print(f"⚠️ SQL 프롬프트 로드 실패, 기본값 사용: {e}")
+    SQL_AGENT_PREFIX = """...(위의 하드코딩된 프롬프트)..."""
 
 SQL_AGENT_SUFFIX = """
 [최종 지침]
@@ -260,8 +224,6 @@ def jeju_safety_statistics_db(query: str) -> str:
 
 # --- 4. 관광정보 RAG 도구 (Tool 4) ---
 # 4-1 RAG 체인
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
 PROMPT_FILE = os.path.join(PROJECT_ROOT, "prompts", "jeju_tourism_rag_prompt.yaml")
 prompt_rag = load_prompt(PROMPT_FILE)
 
